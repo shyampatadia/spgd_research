@@ -162,26 +162,73 @@ That third difference — *the selection rule* — is the one we'll spend the wh
 
 ## SLIDE 9 — The SPGD algorithm
 
-**[~60s]**
+**[~3 min]**
 
-"And here's the algorithm written out. Don't worry about reading every line — let me walk you through the key part.
+"Okay, now I want to walk through the actual algorithm slowly, line by line, with a concrete real example — so you really understand what each part does, and more importantly, **which lines are SPGD-unique versus which lines are just plain gradient descent.** Most of this algorithm is *not* new; only a small block in the middle is.
 
-The outer loop is just normal training: for $T$ steps, do something.
+### Let me set up the example.
 
-Inside, *most of the time*, you do line 11 — the standard gradient descent step. $\theta$ moves opposite the gradient by a small amount $\eta$. Standard SGD.
+Imagine we're training **ResNet-18 on CIFAR-10**. CIFAR-10 is a classic dataset — 50,000 small images of 10 categories: cats, dogs, planes, cars, etc. ResNet-18 is a deep convolutional network with about **11 million parameters**. That whole 11-million-element vector is our $\theta$. This is literally Experiment 4 in my paper, so the numbers I'm about to use are real.
 
-But — every $\textit{IterP}$ steps — you trigger the perturbation phase, which is lines 4 through 8:
+### The Require line — what you give SPGD before it starts.
 
-- Line 4: sample $N_P$ candidate jumps from a uniform distribution between $-\textit{Amp}$ and $+\textit{Amp}$.
-- Line 5: compute the loss at each candidate position.
-- Line 6: pick the *best* one — the one with smallest loss. That's $k^\star$.
-- Line 7: if that best candidate is at most as bad as where you currently are, jump there.
+*(point to top of algorithm)* Look at the top — these are the inputs:
+- $\theta_0$ — the **initial weights** of ResNet-18, randomly initialized.
+- $\eta$ — the **learning rate**, we use 0.01. Standard SGD parameter.
+- $Amp$ — the **perturbation amplitude**, 0.001. This means when we perturb a weight, we shift it by at most 0.001 in either direction.
+- $N_P$ — **number of candidates** per perturbation phase. We use 5.
+- $IterP$ — **how often perturbation fires**. We use 200, meaning every 200 minibatch updates — roughly twice per epoch on CIFAR-10.
+- $T$ — total training steps.
 
-Then you go back to gradient descent.
+The first three — $\theta_0$, $\eta$, and the loop length — are exactly what *plain SGD* needs. The last three — $Amp$, $N_P$, $IterP$ — are the **SPGD-specific knobs.** Three new hyperparameters, that's the whole API surface.
 
-Two things to notice about cost:
-- Each perturbation phase costs you $N_P$ extra forward passes. No extra gradient computation — just function evaluations, which are cheaper.
-- The two hyperparameters that matter are $N_P$ — how *broadly* you explore — and $\textit{IterP}$ — how *often* you explore."
+### The loop — let me walk through what happens at different steps.
+
+For each step $t$ from 0 up to $T-1$, *two things might happen.*
+
+**On most steps — say step 1, step 2, step 50, step 199 — the only thing that runs is line 11.** Look at line 11. That's $\theta_{t+1} \leftarrow \theta_t - \eta \nabla f(\theta_t)$. Take the gradient of the loss with respect to the weights, and subtract a small fraction of it. **This is exactly vanilla SGD.** Nothing new here. If you only ever ran line 11, you'd have plain stochastic gradient descent — the optimizer everyone has been using since 1951.
+
+**But every 200 steps — at step 200, 400, 600, and so on — the `if` on line 2 fires.** Now we enter the perturbation phase, which is **lines 3 through 8**, *before* the standard gradient step on line 11. **Lines 3 through 8 are the SPGD-unique part.** This block is the entire contribution of the paper. Let me walk through what happens at, say, step 200 of our CIFAR-10 training:
+
+#### Line 4 — Sample $N_P$ candidates.
+
+We generate 5 candidate weight vectors. Each candidate is 'the current ResNet-18 weights, plus a random offset.' For every one of the 11 million parameters in the network, we draw a uniform random number in $[-0.001, +0.001]$ and add it. We do this five times, independently. **So now we've got 5 slightly perturbed copies of the network sitting in memory** — five alternative ResNet-18s, all very close to where we currently are, but each pushed in a different random direction.
+
+#### Line 5 — Evaluate each candidate.
+
+For each of those 5 candidates, we run **one forward pass** on the current minibatch and record the loss. So that's 5 extra forward passes total. **Important: no extra backward passes. No extra gradients are computed here.** That matters for cost — gradients are roughly twice as expensive as forward passes, and SPGD avoids that overhead. We only need *function values*, not derivatives, to rank the candidates.
+
+#### Line 6 — Pick the best.
+
+Look at the 5 losses, pick the candidate with the smallest one. That's $k^\star$. The little star just means 'the winner.'
+
+#### Line 7 — The acceptance check.
+
+This is the most important line in the whole algorithm. We ask: '**Is the winning candidate's loss actually $\le$ the loss at our current weights?**' If yes, jump there — line 8 — replace the current weights with that perturbed version. If no — meaning even our best candidate is worse than where we already are — **do nothing.** Stay put.
+
+This is what's called a **no-regret property**: SPGD can never make things actively worse. The worst-case outcome of a perturbation phase is that you wasted 5 forward passes and stayed put. You don't accidentally jump to a bad spot.
+
+#### Line 11 — Gradient step (back to vanilla SGD).
+
+Whether or not we accepted a candidate, we then do the standard SGD step from wherever we are now. Gradient flows from the current position — possibly the perturbed position, possibly the original — and we keep training.
+
+### Then steps 201 through 399 are pure SGD again.
+
+The `if` on line 2 only fires every $IterP = 200$ steps, so for the next 199 steps, we just run line 11 over and over. Plain gradient descent. Until step 400 — when the cycle repeats.
+
+### So zooming all the way out:
+
+**SPGD is identical to SGD on 199 out of every 200 steps.** On the 200th step, it inserts a small Monte-Carlo exploration block *before* the gradient update — sample 5 perturbations, evaluate them, pick the best, jump only if it's better. That's the entire algorithm. That's everything that's new.
+
+### Cost — the two bullet points on the slide.
+
+*(point to bullets)*
+
+**First bullet — cost per perturbation phase.** Each phase costs $N_P$ extra forward passes. In our case, 5. No extra gradients. So if a forward pass costs $F$ and a backward pass costs about $2F$, then a normal training step costs $3F$, and a perturbation step costs an extra $5F$ on top of that. Sounds expensive — but it only happens once every 200 steps, so the average overhead is **under 1%.** Effectively free.
+
+**Second bullet — the two knobs that matter.** $N_P$ controls how *broadly* you explore each phase — more candidates means a better chance of finding a good one, but more compute. $IterP$ controls how *often* you explore — smaller $IterP$ means more frequent perturbation. We do a full $4 \times 4$ ablation on both of these in Appendix A — I'll mention it in the backup slides if there are questions.
+
+So that's SPGD, completely unpacked. **The vast majority of the algorithm is just SGD you already know.** The novelty is a small targeted insertion: every $IterP$ steps, take $N_P$ random looks at nearby positions and commit to the best one *only if* it actually improves things."
 
 ---
 
