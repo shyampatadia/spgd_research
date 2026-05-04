@@ -636,3 +636,79 @@ And the one-line take-away from all this work, the line I'd put on a sticker:
 
 **Q: What's the most surprising finding?**
 "The acceptance-rate gap on MovieLens — 30% vs 9%. That's the cleanest direct evidence that SPGD's mechanism is empirically active even on a high-dimensional ML problem. It's not just a theoretical algorithm — it's actually firing."
+
+---
+
+## DEEPER REVIEWER QUESTIONS
+
+> *Questions a sharp committee member or peer reviewer would press on. Use these to pressure-test your reasoning before the talk. Each comes with a draft answer — read them, internalise the reasoning, then answer in your own words on the day.*
+
+### Statistical / reproducibility
+
+**Q: With only 3 seeds, what statistical test backs the $+3.78$pp claim? What's the p-value?**
+
+"Honestly, I don't claim a p-value — with $n=3$ and a paired protocol, formal tests have almost no statistical power. The strongest claim I can make is *sign-consistency*: SPGD beat RPGD on 3 out of 3 seeds, with per-seed deltas of $+4.42$, $+1.14$, and $+5.77$ percentage points. Under a null hypothesis of no effect, the probability of seeing 3-out-of-3 same-direction wins is $1/8 = 0.125$ — on its own, not significant. The supporting evidence is the consistent direction *combined with* the acceptance-rate gap on MovieLens (30% vs 9%) which is computed over hundreds of phases per seed. Together those two findings make a 'pure luck' interpretation hard to sustain, even if neither alone has a clean p-value."
+
+**Q: The unpaired std for RPGD on CIFAR-10 is $0.046$ — bigger than your $+3.78$pp gap. How can the result be meaningful?**
+
+"That's a good catch and the answer is that the paired protocol changes which variance source matters. The $0.046$ measures *across-seed* variability — what an unpaired RPGD run looks like in absolute terms. But when SPGD and RPGD start from the *same* initialization on each seed, initialization variance cancels in the difference. The relevant statistic is the std of the *paired delta*, not the std of either method individually. For my 3 paired deltas — $+4.42, +1.14, +5.77$ — the std is roughly 2.4pp, against a mean of $+3.78$. That's the right comparison, and sign-consistency on 3/3 seeds is the cleanest expression of it."
+
+**Q: How reproducible is this? If I run 3 fresh seeds, will I see the same numbers?**
+
+"The *direction* should be robust — I'd be surprised to see RPGD beat SPGD on a fresh draw of 3 seeds. The *magnitude* will vary, probably in the range of $+1.5$ to $+6$ pp. The MovieLens acceptance-rate result is much more reproducible because it averages over hundreds of perturbation phases per run, not 3 outcomes — I'd expect $30\% \pm 3\%$ across any reasonable set of fresh seeds."
+
+### Methodological / experimental design
+
+**Q: Why disable batch norm only in `layer1` and `layer2`, not the whole network?**
+
+"I tried fully BN-disabled ResNet — it didn't train stably at $\text{lr} = 10^{-2}$, gradients exploded. The compromise was disabling BN where I most expected saddle-like geometry — early layers — while keeping it in `layer3`/`layer4` for training stability. A fully BN-disabled network would have been the cleaner experiment but would have required either lr scheduling or much smaller learning rates, which would have changed other things and confounded the comparison."
+
+**Q: You held the learning rate fixed at $10^{-2}$ for all gradient-only optimizers. Couldn't SPGD's win just reflect the fact that SGD wasn't tuned?**
+
+"That's a real critique and I want to acknowledge it honestly. A proper per-optimizer learning-rate sweep would be the correct robustness check, and I don't have it — that's a genuine limitation of this study. The reason I held lr fixed was to keep the SPGD-vs-RPGD contrast clean: same compute, same gradient step, only the selection rule differs. But I can't rule out that SGD with a tuned lr would close some of the gap. Per-optimizer lr tuning is the obvious follow-up."
+
+**Q: Are you committing the multiple-comparisons sin? You've got 5 optimizers $\times$ 4 experiments — 20 comparisons.**
+
+"Strictly yes, but my main claims rest on a small number of pre-registered contrasts: SPGD vs. RPGD (the central question) on each experiment, plus the acceptance-rate diagnostic on MovieLens. I'm not data-mining for any-vs-any wins. The CIFAR-10 result wouldn't be a $+3.78$pp paired delta on three seeds by chance under any reasonable family-wise correction either — sign-consistency alone is the discipline."
+
+### Algorithmic / could-it-be-something-else
+
+**Q: Couldn't SPGD's win be implicit regularisation — same flavour as dropout?**
+
+"Possibly, in part — SPGD does inject noise, and noise is a regulariser. But the RPGD control isolates that. RPGD has the *same* noise injection, the *same* compute, the *same* candidate distribution. The only difference is the selection rule. If SPGD's win came purely from noise-as-regularisation, RPGD should match it; instead, RPGD is the *worst* gradient method on CIFAR-10. So the SPGD-vs-RPGD gap specifically points to the *selection rule* doing work beyond regularisation. The cleanest follow-up would be measuring sharpness or flatness of final minima — that I haven't done."
+
+**Q: Couldn't the rejection rule effectively be reducing the learning rate?**
+
+"Interesting framing. SPGD's $\le$ rule does prevent some bad updates from being committed, which is conceptually similar to clipping bad steps or reducing the lr. But two things speak against this being the whole story. First, PGD has no rejection and still beats SGD on Rosenbrock. Second, SPGD's CIFAR-10 win is *over RPGD*, which has the same compute, same noise, same rejection mechanism — just no smart selection. So while a 'soft lr reduction' interpretation isn't crazy, it doesn't explain why SPGD specifically dominates RPGD."
+
+**Q: On Rosenbrock, PGD slightly beats SPGD. What does that say about your central claim?**
+
+"It actually supports the central claim. My claim is that SPGD's selection rule helps escape from *local minima*. Rosenbrock has no local minima — there's nothing to escape. The geometry rewards perturbation (cutting across the curved valley) but not selection (no minima to choose between). So we'd expect SPGD's *selection* advantage to vanish on Rosenbrock — and it does. Where the selection rule has work to do (Rastrigin, Ackley, MovieLens), SPGD wins or ties; where it doesn't (Rosenbrock), it ties simpler methods. That's the right behaviour, not a counter-example."
+
+### Theory / interpretation
+
+**Q: Does SPGD have a convergence proof?**
+
+"Not from me, and not from the original paper. PGD has the formal $\tilde{O}(d/\varepsilon^2)$ second-order-stationarity guarantee from Jin et al. 2017. SPGD doesn't yet. A natural conjecture is that the steepest-of-$N_P$ candidates concentrates around true descent directions in expectation, which would let you replace some PGD iterations with $N_P$ candidate evaluations — but proving that requires showing the rate at which 'best of $N_P$ uniform samples' beats 'one Gaussian sample' as a function of dimension and amplitude. That's an open problem I'd love someone to pick up."
+
+**Q: How does the acceptance rate change across training?**
+
+"I report a time-averaged number. In practice — and this is qualitative, I haven't formally tracked it — acceptance is higher early in training when the iterate is still in a saddle's neighbourhood and improving candidates are easy to find, and falls off near convergence when most candidates are worse than the current iterate. Tracking the acceptance-rate trajectory across training would be a great follow-up: it would tell us *when* SPGD is doing useful work, not just whether it is."
+
+**Q: Zero stagnation on CIFAR-10 means no saddles — so why does SPGD help there at all?**
+
+"That's the central puzzle of this study, and I want to be honest about it. The original paper frames SPGD as a saddle-escape method. But on CIFAR-10 there are no measurable saddles — and SPGD still wins. My best explanation is that 'best of $N_P$ candidates' biases the trajectory toward slightly *flatter* regions of the loss landscape, even when no formal saddle is present. That's a flatness/sharpness story, not a saddle-escape story. So the real reframe of this study is: SPGD is best understood as a *biased candidate selector*, and 'saddle escape' was a red herring framing inherited from the original theoretical motivation."
+
+### Big picture
+
+**Q: Should we abandon perturbation methods given your null on stagnation?**
+
+"No — but we should reframe what they're for. Perturbation+selection clearly helps on real ML, the CIFAR-10 $+3.78$pp on every seed is real. It just isn't helping for the reason the theory community originally proposed (saddle escape). The reframe is: perturbation biases the trajectory toward flatter minima, which has known generalisation benefits, and selection makes that bias more efficient. The methodological recommendation — always use a same-compute random-selection control — stands regardless of which mechanism you think is doing the work."
+
+**Q: What's the single sentence a practitioner should take away?**
+
+"If you're running expensive deep training and have spare forward-pass budget, drop in an SPGD-style selection step every few hundred iterations — it costs about 1% overhead, the worst case is 'nothing happens,' and on settings with non-trivial loss-landscape geometry you can pick up a few free percentage points of accuracy. It's strictly dominated by SGD-equivalent compute, so there's no reason not to."
+
+**Q: What's the next experiment you'd run if you had another semester?**
+
+"SPGD-on-Adam. Combine the selection rule with Adam's adaptive scaling — predict it inherits both. That's the single most natural extension and would address both the 'isn't this just lr-tuning?' critique and the 'Adam is structurally different' critique simultaneously. After that, a transformer or LLM-scale test, but that's a compute project of its own."
