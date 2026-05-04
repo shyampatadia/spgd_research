@@ -1,0 +1,1034 @@
+% ============================================================================
+% MA 551 Computational Statistics -- Final Project
+% Empirical Analysis of Saddle-Point-Escaping Optimizers (SPGD)
+%
+% Self-contained arXiv-preprint-style report.  Compiles with pdflatex on
+% Overleaf with no extra .sty files; just upload report.tex, references.bib,
+% and the figures/ directory.
+%
+% Build:
+%   pdflatex report
+%   bibtex   report
+%   pdflatex report
+%   pdflatex report
+% ============================================================================
+
+\documentclass[11pt]{article}
+
+% ---- Page geometry / arXiv-preprint look -----------------------------------
+\usepackage[margin=1in,headheight=14pt]{geometry}
+\usepackage{microtype}
+\usepackage{lmodern}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+
+% ---- Math, graphics, tables ------------------------------------------------
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage[font=small,labelfont=bf]{caption}
+\usepackage{subcaption}
+\usepackage{xcolor}
+% ---- Float placement -------------------------------------------------------
+% `float`    -> the [H] specifier ("HERE, no really")
+% `placeins` -> \FloatBarrier prevents floats from crossing subsection ends
+\usepackage{float}
+\usepackage{placeins}  % no [section] option: don't auto-insert \FloatBarrier
+                       % at every section (that was causing big trailing
+                       % whitespace when a section is shorter than the
+                       % deferred figure).
+% Be lenient with float-page packing so figures don't get postponed
+% and leave whitespace behind.
+\renewcommand{\topfraction}{0.95}
+\renewcommand{\bottomfraction}{0.95}
+\renewcommand{\textfraction}{0.05}
+\renewcommand{\floatpagefraction}{0.6}
+\setcounter{topnumber}{4}
+\setcounter{bottomnumber}{3}
+\setcounter{totalnumber}{6}
+
+% Allow pages to end short instead of being vertically justified -- this
+% is the main fix for "huge gap before a figure that didn't fit".
+\raggedbottom
+
+% Tighten the white space around floats (default \article spacing is
+% generous and causes visible gaps especially for [H] figures).
+\setlength{\textfloatsep}{8pt plus 2pt minus 2pt}
+\setlength{\intextsep}{8pt plus 2pt minus 2pt}
+\setlength{\floatsep}{8pt plus 2pt minus 2pt}
+\setlength{\abovecaptionskip}{4pt}
+\setlength{\belowcaptionskip}{2pt}
+
+% ---- Algorithms ------------------------------------------------------------
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+
+% ---- Bibliography (author-year, arXiv-style) ------------------------------
+\usepackage[numbers,sort&compress]{natbib}
+
+% ---- Hyperlinks (load last) ------------------------------------------------
+\usepackage[colorlinks=true,
+            linkcolor=blue!50!black,
+            citecolor=blue!50!black,
+            urlcolor=blue!50!black]{hyperref}
+
+% ---- Fancy header (light) --------------------------------------------------
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{}
+\renewcommand{\headrulewidth}{0pt}
+\fancyhead[L]{\small\textsc{SPGD on Non-Convex ML Loss Landscapes}}
+\fancyhead[R]{\small \thepage}
+
+% ---- Title block (arXiv-preprint style) -----------------------------------
+\title{\bfseries \LARGE Does Steepest Selection Help?\\
+       An Empirical Study of Saddle-Point-Escaping Optimizers\\
+       on Non-Convex Machine Learning Loss Landscapes}
+
+\author{%
+  \textbf{Shyam Patadia}\\
+  Worcester Polytechnic Institute (WPI)\\
+  \texttt{spatadia@wpi.edu}\\[2pt]
+  \small MA 551: Computational Statistics
+}
+
+\date{\today}
+
+% ---- Convenience macros ----------------------------------------------------
+\newcommand{\np}{\ensuremath{N_P}}
+\newcommand{\iterp}{\ensuremath{\textit{IterP}}}
+\newcommand{\amp}{\ensuremath{\textit{Amp}}}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\E}{\mathbb{E}}
+
+\begin{document}
+\maketitle
+\thispagestyle{empty}
+
+% ============================================================================
+\begin{abstract}
+\noindent
+Training a modern machine learning model is, mathematically, the
+minimization of a high-dimensional non-convex loss function. In such
+landscapes, saddle points dominate the population of critical points and
+constitute the chief obstacle to first-order optimization. \emph{Steepest
+Perturbed Gradient Descent} (SPGD) \citep{vahedi2024spgd} is a
+candidate-selection rule on top of gradient descent, motivated by
+saddle escape: every \iterp{} iterations, sample \np{} candidate
+solutions in a uniform neighborhood of the current iterate and accept
+the candidate that yields the steepest loss decrease (the paper's
+$\leq$ acceptance rule). SPGD has only been
+evaluated on smooth mathematical benchmarks and a small engineering
+problem; its behavior on neural-network loss landscapes has not been
+characterized. This work provides the first systematic empirical study
+of SPGD on machine-learning workloads. We implement SPGD as a PyTorch
+\verb|Optimizer|, compare it against SGD, Adam, perturbed gradient
+descent (PGD) \citep{jin2017escape}, and a same-mechanism
+random-perturbation control (RPGD) on four discriminating testbeds
+in the main study --- non-convex synthetic benchmarks, OpenML-CC18
+heterogeneous tabular data, a CIFAR-10/ResNet-18 anchor experiment,
+and a MovieLens-100K non-convex matrix-completion benchmark --- with
+two further diagnostic experiments (Two Moons visualisation and an
+$\np \times \iterp$ hyperparameter ablation) reported in the
+appendix. We measure
+saddle-point behavior directly via stagnation episodes
+($\|\nabla f\| < \varepsilon$). Our key empirical finding is that
+SPGD's steepest-selection rule provides a measurable advantage over
+random perturbation across both synthetic and real-data regimes (mean
+$+3.78$ percentage-point test-accuracy gap on CIFAR-10/ResNet-18,
+paired across all seeds), but the gap relative to vanilla SGD is small
+when no overt plateau is encountered, and Adam dominates absolute
+accuracy on well-conditioned landscapes. We conclude that the value of
+SPGD lies in its \emph{selection rule}, not in perturbation alone, and
+sketch when this advantage is operationally relevant.
+\end{abstract}
+
+% ============================================================================
+\section{Introduction}
+\label{sec:intro}
+
+The optimization viewpoint of machine learning casts training as the
+minimization of an empirical risk
+$f(\theta) = \frac{1}{N}\sum_{i=1}^{N} \ell(\theta; x_i, y_i)$
+over the parameter vector $\theta \in \R^d$
+\citep{robbins1951stochastic,goodfellow2016deep}. For modern
+architectures $d$ is in the millions, $f$ is non-convex, and the
+gradient $\nabla f(\theta)$ provides only local information. A long
+line of work, both theoretical and empirical, has established that the
+critical-point structure of $f$ in high dimensions is dominated by
+\emph{saddle points} rather than by local minima
+\citep{dauphin2014saddle,choromanska2015loss}. At a strict saddle the
+gradient vanishes, the Hessian has both positive and negative
+eigenvalues, and a vanilla gradient method --- which uses only
+$\nabla f$ --- can stall for many iterations while the loss remains
+nearly constant.
+
+Two families of solutions have been proposed.
+\textbf{Adaptive methods} (Adam \citep{kingma2015adam}, RMSProp,
+AdaGrad, etc.) rescale the gradient by per-parameter second-moment
+estimates, which empirically allows escape from many ill-conditioned
+regions but does not exploit the loss value at points other than the
+iterate.
+\textbf{Perturbation methods} inject randomness near critical points to
+cross the negative-curvature directions of the saddle.
+\citet{ge2015escaping} and \citet{jin2017escape} establish that
+gradient descent with isotropic Gaussian noise added on stagnation
+detects strict saddles in a polynomial number of steps and converges
+to a second-order stationary point.
+\citet{lee2016gradient} prove that gradient descent almost surely does
+not converge to a strict saddle, but the time spent traversing the
+saddle's neighborhood remains the practical bottleneck.
+
+\citet{vahedi2024spgd} introduce \emph{Steepest Perturbed Gradient
+Descent} (SPGD), which differs from PGD-style noise injection in two
+ways. First, SPGD perturbs uniformly (not via Gaussian noise tied to
+the gradient norm). Second, and more importantly, SPGD draws \np{}
+candidate perturbations and \emph{selects} the one yielding the
+greatest loss decrease, fall\-ing back to the gradient step if no
+candidate improves on the iterate. This combines a directed
+gradient direction with a Monte Carlo exploration step. The original
+work evaluates SPGD on Rastrigin, Ackley, Rosenbrock, and a 3-D
+configuration-space engineering benchmark. The behavior of SPGD on
+\emph{machine-learning} loss landscapes --- where the relevant geometry
+is shaped by ReLU activations, batch normalization
+\citep{ioffe2015batchnorm}, and stochastic mini-batching --- is to our
+knowledge unstudied.
+
+\paragraph{Contributions.}
+\begin{enumerate}[leftmargin=*,itemsep=2pt,topsep=2pt]
+  \item We provide an open implementation of SPGD as a PyTorch
+        \verb|Optimizer| subclass alongside reference implementations
+        of PGD and a same-mechanism random-perturbation control (RPGD).
+  \item We design a controlled head-to-head comparison across four
+        discriminating testbeds spanning synthetic, tabular, vision,
+        and matrix-completion settings, each with a paired-seed
+        protocol so optimizer-vs-optimizer effects are isolated from
+        initialization noise; two further diagnostic experiments
+        (Two Moons visualisation and the $\np \times \iterp$
+        ablation) are reported in the appendix.
+  \item We provide direct measurements of saddle-related behavior via
+        stagnation episodes, in addition to the usual loss/accuracy
+        endpoints, and report results that question the importance of
+        ``saddle'' geometry in our deepest experiment.
+  \item We isolate which mechanism drives SPGD's advantage by
+        comparing SPGD against the random-perturbation control (RPGD).
+        On CIFAR-10/ResNet-18 the gap is mean $+3.78$ pp test accuracy,
+        paired across all seeds, supporting the claim that the
+        steepest-selection rule (not perturbation alone) is the
+        mechanism doing useful work.
+  \item We characterize SPGD's sensitivity to its two
+        hyper\-parameters \np{} and \iterp{} via a $4 \times 4$
+        ablation, identifying a practical operating regime
+        (Appendix~\ref{app:ablation}).
+  \item We empirically test the SPGD paper's stated future-work
+        hypothesis --- that the algorithm has ``potential to
+        significantly enhance neural network training''
+        \citep[Conclusion]{vahedi2024spgd} --- on a non-convex ML
+        benchmark with documented saddle structure (MovieLens-100K
+        matrix completion via Burer--Monteiro factorisation;
+        \citealp{burer2003nonlinear,ge2016matrix,sun2018geometric}).
+        Under fair experimental protocol, the paper-faithful SPGD
+        selection rule fires at $30\%$ acceptance versus $9\%$ for
+        the random-perturbation control --- direct evidence that the
+        mechanism is empirically active --- but the held-out test
+        RMSE gain over plain SGD is within seed-noise, splitting the
+        paper's hypothesis into a mechanism-positive,
+        generalisation-neutral finding.
+\end{enumerate}
+
+% ============================================================================
+\section{Background}
+\label{sec:background}
+
+In high-dimensional non-convex losses the ratio of saddle points to
+local minima grows exponentially in $d$, so the practical obstacle to
+first-order optimisation is the slow traversal of saddle
+neighbourhoods rather than convergence to a bad local minimum
+\citep{dauphin2014saddle,choromanska2015loss}.  Perturbed gradient
+descent (PGD) \citep{ge2015escaping,jin2017escape} addresses this by
+adding Gaussian noise when $\|\nabla f\|$ is small; PGD finds a
+second-order stationary point in $\tilde O(d/\varepsilon^{2})$
+iterations w.h.p.
+
+SPGD \citep{vahedi2024spgd} differs from PGD on three points:
+(i) it perturbs unconditionally every \iterp{} steps, not on
+stagnation detection; (ii) it draws \np{} candidates per perturbation
+phase rather than one; and (iii) it commits the candidate with the
+steepest loss decrease.  Algorithm~\ref{alg:spgd} restates the
+procedure.
+
+\begin{algorithm}[!htbp]
+\caption{Steepest Perturbed Gradient Descent (SPGD)}
+\label{alg:spgd}
+\begin{algorithmic}[1]
+\Require initial parameters $\theta_0$, learning rate $\eta$, perturbation amplitude $\amp$,
+         number of candidates \np{}, perturbation interval \iterp{}, total steps $T$
+\For{$t = 0, \ldots, T-1$}
+  \If{$t \bmod \iterp{} = 0$ \textbf{and} $t > 0$}
+    \State Sample \np{} candidates $\delta^{(k)} \sim \mathrm{Uniform}(-\amp, \amp)^d$
+    \State Evaluate $f(\theta_t + \delta^{(k)})$ for $k = 1, \ldots, \np{}$
+    \State Let $k^\star = \arg\min_{k} f(\theta_t + \delta^{(k)})$
+    \If{$f(\theta_t + \delta^{(k^\star)}) \leq f(\theta_t)$}
+      \State $\theta_t \gets \theta_t + \delta^{(k^\star)}$ \Comment{accept candidate (paper's $\leq$ rule)}
+    \EndIf
+  \EndIf
+  \State $\theta_{t+1} \gets \theta_t - \eta \nabla f(\theta_t)$ \Comment{standard gradient step}
+\EndFor
+\end{algorithmic}
+\end{algorithm}
+
+% ============================================================================
+\section{Methodology}
+\label{sec:methodology}
+
+\subsection{Optimizers under comparison}
+\label{sec:optimizers}
+We compare five algorithms, chosen so that each ablation isolates a
+specific mechanism.
+
+\begin{itemize}[leftmargin=*,itemsep=2pt,topsep=2pt]
+  \item \textbf{SGD} \citep{robbins1951stochastic}: vanilla gradient
+        descent, no momentum. The first-order baseline.
+  \item \textbf{Adam} \citep{kingma2015adam}: adaptive per-parameter
+        learning rate. The modern ML default; included to ground our
+        results against current practice.
+  \item \textbf{PGD} \citep{jin2017escape}: gradient descent with
+        Gaussian noise added every \iterp{} steps; one perturbation,
+        no selection.
+  \item \textbf{RPGD} (\emph{random-perturbation control}): every
+        \iterp{} steps draw \np{} candidates uniformly and accept
+        \emph{one at random}. Same compute as SPGD; differs only in
+        the selection rule.
+  \item \textbf{SPGD} \citep{vahedi2024spgd}: as in
+        Algorithm~\ref{alg:spgd}; the steepest of the \np{} candidates
+        is selected.
+\end{itemize}
+
+\noindent The \textbf{SPGD-vs-RPGD} contrast is the cleanest test of
+SPGD's central claim: both algorithms perturb the same way and pay the
+same compute cost, so any difference in outcome can be attributed to
+the selection rule. The \textbf{SPGD-vs-PGD} contrast tests whether
+multi-candidate perturbation is helpful at all, and the
+\textbf{SPGD-vs-SGD} contrast tests whether perturbation+selection
+beats no perturbation.
+
+\subsection{Diagnostics}
+\label{sec:diagnostics}
+Beyond the standard final-loss / final-accuracy endpoints we record
+saddle-related behavior directly. A
+\emph{stagnation episode} is a maximal run of consecutive steps with
+$\|\nabla f(\theta_t)\|_2 < \varepsilon$. We log the number of
+episodes, the longest episode, and the total number of stagnant steps.
+We use the proposal's threshold $\varepsilon = 10^{-4}$ on the
+synthetic benchmarks (Exp~\ref{sec:exp1}) and the Two Moons
+diagnostic (App.~\ref{app:two-moons}) including its ablation
+(App.~\ref{app:ablation}); $\varepsilon = 10^{-3}$ on OpenML
+(Exp~\ref{sec:exp3}) and the CIFAR-10 mini\-batch gradient
+(Exp~\ref{sec:exp4}), where the looser threshold accommodates
+mini\-batch gradient noise. The proposal also listed an
+\emph{escape-time} metric in addition to stagnation; we report
+escape-time on Experiment~\ref{sec:exp6} (matrix completion), the
+only setting where the iterate sits inside a documented saddle
+plateau long enough for ``escape'' to have an objective definition.
+Where stagnation episodes are zero across all runs of an experiment
+(App.~\ref{app:two-moons}, Exp~\ref{sec:exp4},
+App.~\ref{app:ablation}), escape-time is undefined and we say so
+explicitly rather than reporting degenerate numbers.
+
+\subsection{Paired-seed protocol}
+\label{sec:paired}
+For each (experiment, seed) the data split, parameter initialization,
+and any per-seed randomness are fixed before the optimizer is
+selected. The same five optimizers are then run on the
+\emph{same} initial state. This converts an across-seed comparison
+into a paired comparison: each seed produces a tuple of five outcomes
+that share initialization. Paired differences are reported in the
+results section because they are markedly less noisy than unpaired
+means at our small seed counts ($S \in \{3, 5, 30\}$).
+
+\subsection{Implementation}
+The full software stack is PyTorch \citep{paszke2019pytorch} with
+scikit-learn \citep{pedregosa2011sklearn} for synthetic-data
+generation. Datasets from OpenML-CC18
+\citep{vanschoren2014openml,bischl2021openmlcc18} are accessed via the
+\texttt{openml} Python client. The CIFAR-10 anchor experiment uses
+ResNet-18 \citep{he2016resnet} from \texttt{torchvision} with batch
+normalization \citep{ioffe2015batchnorm} disabled in stages
+\texttt{layer1} and \texttt{layer2} to deliberately preserve a
+fraction of the saddle structure that BN would otherwise smooth out.
+This concretises the proposal's ``no BN in early layers'' plan:
+\texttt{layer1}/\texttt{layer2} are the ``early'' stages, and we
+retained BN in \texttt{layer3}/\texttt{layer4} for training stability
+at \texttt{lr=1e-2} on the gradient-only optimizers.
+Source code, configurations, exact hyper\-parameters, and analysis
+scripts are organized under \texttt{src/spgd\_study/} and
+\texttt{experiments/}.
+
+% ============================================================================
+\section{Experiments and Results}
+\label{sec:results}
+
+We present four discriminating experiments, increasing in scale from
+$d=2$ analytic benchmarks to a $1.1\times 10^{7}$-parameter image
+classifier and a $1.3\times 10^{4}$-parameter matrix-completion
+problem; two further diagnostic experiments are reported in the
+appendix.
+
+% --------------------------------------------------------------------------
+\subsection{Experiment 1: Non-Convex Benchmark Functions}
+\label{sec:exp1}
+
+\paragraph{Setup.} We run all five optimizers on Rastrigin, Ackley,
+and Rosenbrock at $d \in \{2, 10, 50\}$, with 30 random initializations
+per (function, dimension, optimizer). Convergence is declared at
+$f(\theta) < \varepsilon = 10^{-2}$ from the global optimum. We
+measure (i) the final function value, (ii) the iteration of first
+convergence, and (iii) the success rate (fraction of seeds reaching
+the threshold).
+
+\paragraph{Results.} Figure~\ref{fig:exp1-trajectories} shows 2D
+trajectories on each benchmark; SPGD and PGD escape multiple Rastrigin
+basins that trap vanilla SGD. Figure~\ref{fig:exp1-convergence} plots
+running-min loss vs.\ iteration for $d \in \{2,10,50\}$, and
+Figure~\ref{fig:exp1-success} reports per-(function, dimension)
+success rates. The cleanest signal appears on Ackley at $d=10$, where
+SPGD's mean final loss is below RPGD's (paired delta of $-2.57$ in
+mean loss, $-2.70$ in median). At $d=50$ all perturbation methods
+struggle: a constant amplitude $\amp{} = 0.5$ that worked at $d=2$
+becomes a $\sqrt{50}/\sqrt{2} \approx 5\times$ larger total
+displacement and starts to produce destructive perturbations.
+Per-parameter scaling of $\amp$, used in our subsequent experiments,
+addresses this.
+
+\begin{figure}[!htbp]
+  \centering
+  \includegraphics[width=\linewidth]{figures/exp1_trajectories_2d.png}
+  \caption{2D trajectories of all five optimizers on Rastrigin, Ackley,
+           and Rosenbrock. Stars mark the global optimum; thirty
+           seeds per cell. SPGD's perturbation phases are visible as
+           short ``hops'' that allow escape from local minima which
+           vanilla gradient methods cannot leave.}
+  \label{fig:exp1-trajectories}
+\end{figure}
+
+\begin{figure}[!htbp]
+  \centering
+  \includegraphics[width=\linewidth]{figures/exp1_convergence.png}
+  \caption{Running-minimum loss vs.\ iteration on Experiment 1 (mean
+           $\pm 1$ std across 30 seeds). Rows: dimension; columns:
+           function. Symlog $y$-axis. The benefit of perturbation
+           methods grows with dimension on Ackley but vanishes on
+           Rosenbrock, which has no local minima.}
+  \label{fig:exp1-convergence}
+\end{figure}
+
+\begin{figure}[!htbp]
+  \centering
+  \includegraphics[width=0.95\linewidth]{figures/exp1_success_rate.png}
+  \caption{Success rate (fraction of seeds reaching within
+           $\varepsilon = 10^{-2}$ of the global optimum) per
+           (function, dimension, optimizer). SPGD matches or exceeds
+           RPGD on every Rastrigin and Ackley cell.}
+  \label{fig:exp1-success}
+\end{figure}
+\FloatBarrier
+
+% --------------------------------------------------------------------------
+% Experiment 2 (Two Moons) is a visualization-only diagnostic and has
+% been moved to Appendix~\ref{app:two-moons}.
+
+\subsection{Experiment 3: OpenML-CC18 Tabular Datasets}
+\label{sec:exp3}
+
+\paragraph{Setup.} We select five OpenML-CC18 classification datasets
+spanning a range of sizes and feature types: \texttt{credit-g}
+($n{=}1000$, $p{=}20$), \texttt{kc1}, \texttt{spambase},
+\texttt{segment}, \texttt{vehicle}. A 3-layer MLP is trained on each
+for all five optimizers across three seeds (75 runs total). All
+datasets are normalized; categorical features are one-hot encoded.
+
+\paragraph{Results.} Figure~\ref{fig:exp3-acc} shows test accuracy per
+(dataset, optimizer) and Figure~\ref{fig:exp3-loss} shows training-loss
+trajectories in two complementary views: the left panel includes all
+five optimizers on log-$y$ to make Adam's dominance visible, and the
+right panel shows the four gradient-only methods on linear-$y$ to
+resolve the SGD/PGD/RPGD/SPGD differences that the log-$y$ view
+compresses into a single thick band. The two panels show the same
+data; we plot both so the gradient-only zoom is not read as Adam being
+hidden. The pattern from Experiment~\ref{sec:exp1}
+reproduces: SPGD's mean test accuracy is above RPGD's on a majority of
+(dataset, seed) pairs, supporting the hypothesis that the
+steepest-selection rule transfers from synthetic to real heterogeneous
+tabular data. Adam dominates absolute accuracy on all five datasets,
+consistent with the observation that on small tabular tasks a
+well-conditioned adaptive method has little incentive to perturb.
+Stagnation episodes ($\|\nabla f\|_2 < 10^{-3}$) were rare on this
+suite: only \texttt{credit-g} and \texttt{vehicle} produced any
+non-zero counts, and even there the totals were a handful of episodes
+per run, so we omit the per-dataset stagnation figure as
+uninformative and report the diagnostic in text only.
+
+\begin{figure}[!htbp]
+  \centering
+  \includegraphics[width=\linewidth]{figures/exp3_acc_per_dataset.png}
+  \caption{OpenML-CC18 test accuracy per dataset (mean $\pm 1$ std
+           across 3 seeds). Adam consistently leads; SPGD is at or
+           above SGD on 4/5 datasets and above RPGD on a majority of
+           paired comparisons.}
+  \label{fig:exp3-acc}
+\end{figure}
+
+\begin{figure}[!htbp]
+  \centering
+  \begin{subfigure}{\linewidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/exp3_loss_curves.png}
+    \caption{All five optimisers, log-$y$. Adam's curve is the lowest
+             on all five datasets.}
+    \label{fig:exp3-loss-all}
+  \end{subfigure}
+
+  \vspace{0.6em}
+
+  \begin{subfigure}{\linewidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/exp3_loss_curves_grad_only.png}
+    \caption{Gradient-only methods, linear-$y$ (Adam excluded for
+             readability). The linear axis exposes SPGD's modest but
+             consistent edge over RPGD on plateaus SGD also fails
+             to leave.}
+    \label{fig:exp3-loss-grad}
+  \end{subfigure}
+  \caption{Training-loss curves on OpenML-CC18 (mean $\pm 1$ std,
+           3~seeds). Both panels plot the same runs; the bottom panel
+           is a y-axis zoom on the gradient-only band that the top
+           panel compresses.}
+  \label{fig:exp3-loss}
+\end{figure}
+
+\FloatBarrier
+
+% --------------------------------------------------------------------------
+\subsection{Experiment 4: CIFAR-10 / ResNet-18 (Anchor Experiment)}
+\label{sec:exp4}
+
+\paragraph{Setup.} ResNet-18 \citep{he2016resnet} with batch
+normalization disabled in \texttt{layer1} and \texttt{layer2} (to
+preserve saddle structure that fully-BN networks tend to smooth out)
+is trained on CIFAR-10 \citep{krizhevsky2009cifar} for 50 epochs
+across all five optimizers and three seeds (15 runs).
+Hyperparameters: \texttt{lr=1e-2} for the gradient-only optimizers,
+\texttt{lr=1e-3} for Adam, $\amp = 10^{-3}$ (chosen as $\sim\!2\%$ of
+typical Kaiming-initialized weight magnitude
+\citep{he2015delving}), $\np = 5$, $\iterp = 200$ minibatch steps
+($\sim\!2$ perturbation phases per epoch). Runs executed as a Slurm
+array on two NVIDIA A30 GPUs (mean wall time $\sim 7.6$ min/run).
+
+\paragraph{Results.} Table~\ref{tab:exp4-summary} reports aggregate
+metrics; Figure~\ref{fig:exp4-loss} shows training-loss trajectories
+on log-$y$, and Figure~\ref{fig:exp4-paired} reports the
+\emph{paired} per-seed deltas SPGD$-$RPGD and SPGD$-$SGD. The
+headline numbers:
+
+\begin{itemize}[leftmargin=*,itemsep=1pt,topsep=2pt]
+  \item Mean test accuracies, three seeds, 50 epochs:
+        Adam $0.9015 \pm 0.014$,
+        SPGD $0.8277 \pm 0.028$,
+        SGD  $0.8268 \pm 0.019$,
+        PGD  $0.8091 \pm 0.014$,
+        RPGD $0.7899 \pm 0.046$.
+  \item \textbf{SPGD beats RPGD on all three seeds} with paired mean
+        $+3.78$ pp test accuracy (per-seed: $+4.42$, $+1.14$, $+5.77$
+        pp). This is the single clearest piece of evidence in the
+        study that SPGD's steepest-selection rule contributes signal
+        beyond random perturbation.
+  \item SPGD ties SGD overall (paired mean $+0.09$ pp), consistent
+        with the next finding.
+  \item \textbf{Stagnation episodes were zero for all 15 runs}. None
+        of the five optimizers spent any consecutive step with
+        $\|\nabla f\| < 10^{-3}$. The proposal's intervention
+        (disabling BN in \texttt{layer1}+\texttt{layer2}) was
+        \emph{insufficient} to expose saddle/plateau structure on
+        this CIFAR-10/ResNet-18 setup --- the surviving normalization
+        in \texttt{layer3} and \texttt{layer4} keeps minibatch
+        gradient norms above the threshold throughout training.
+  \item Adam's adaptive step is the strongest absolute optimizer
+        ($\sim\!90\%$); the proposal's acceptance criterion of
+        ``SGD $\geq 0.90$'' was \emph{not} met (SGD: 0.83), an
+        expected consequence of the deliberate handicaps used to
+        preserve saddle structure.
+\end{itemize}
+
+\begin{table}[!htbp]
+\centering
+\small
+\begin{tabular}{lcccr}
+\toprule
+\textbf{Optimizer} & \textbf{Test acc.\ (mean $\pm$ std)} & \textbf{Final train loss} & \textbf{Stagnation eps.} & \textbf{Wall (s)} \\
+\midrule
+SGD   & $0.8268 \pm 0.019$ & $0.249 \pm 0.044$ & $0$ & $451$ \\
+Adam  & $0.9015 \pm 0.014$ & $0.119 \pm 0.079$ & $0$ & $464$ \\
+PGD   & $0.8091 \pm 0.014$ & $0.311 \pm 0.015$ & $0$ & $453$ \\
+RPGD  & $0.7899 \pm 0.046$ & $0.337 \pm 0.079$ & $0$ & $458$ \\
+SPGD  & $0.8277 \pm 0.028$ & $0.293 \pm 0.046$ & $0$ & $460$ \\
+\bottomrule
+\end{tabular}
+\caption{Experiment 4 aggregate results. CIFAR-10, ResNet-18 with BN
+         disabled in \texttt{layer1}+\texttt{layer2}, 50 epochs,
+         3 seeds. All differences are with respect to the same
+         per-seed initialization (paired protocol).}
+\label{tab:exp4-summary}
+\end{table}
+\FloatBarrier
+
+\begin{figure}[!htbp]
+  \centering
+  \begin{subfigure}[t]{0.49\linewidth}
+    \includegraphics[width=\linewidth]{figures/exp4_loss_curves.png}
+    \caption{All five optimizers (log $y$).}
+    \label{fig:exp4-loss-all}
+  \end{subfigure}\hfill
+  \begin{subfigure}[t]{0.49\linewidth}
+    \includegraphics[width=\linewidth]{figures/exp4_loss_curves_grad_only.png}
+    \caption{Gradient-only methods (linear $y$, Adam excluded).}
+    \label{fig:exp4-loss-grad}
+  \end{subfigure}
+  \caption{CIFAR-10/ResNet-18 training cross-entropy (mean $\pm 1$ std
+           across 3 seeds). Both panels plot the same runs. The log-$y$
+           view (left) includes all five optimizers and shows Adam's
+           dominance from epoch~1; the linear-$y$ view (right) is the
+           same plot with Adam removed and the axis rescaled, so the
+           SGD/PGD/RPGD/SPGD differences --- which the log-$y$ view
+           compresses into a single thick band near the axis --- become
+           visible. The right panel is a presentation choice for
+           readability, not a data exclusion.}
+  \label{fig:exp4-loss}
+\end{figure}
+
+\begin{figure}[!htbp]
+  \centering
+  \includegraphics[width=0.85\linewidth]{figures/exp4_paired_spgd.png}
+  \caption{\textbf{Key paired comparison.} Per-seed test-accuracy
+           deltas SPGD$-$RPGD (red) and SPGD$-$SGD (blue) on CIFAR-10.
+           Dashed lines mark the per-comparison means. SPGD beats
+           RPGD on every seed (mean $+3.78$ pp), the cleanest
+           evidence in the study that the \emph{selection rule} ---
+           not perturbation alone --- drives the improvement.}
+  \label{fig:exp4-paired}
+\end{figure}
+\FloatBarrier
+
+% --------------------------------------------------------------------------
+% Experiment 5 ($N_P \times \mathit{IterP}$ ablation on Two Moons) is a
+% non-discriminating diagnostic on a benign landscape and has been moved
+% to Appendix~\ref{app:ablation}.
+
+\subsection{Experiment 6: Matrix Completion on MovieLens-100K}
+\label{sec:exp6}
+
+The preceding experiments (and the appendix diagnostics) evaluate
+SPGD as a neural-network trainer.  This section directly tests the SPGD paper's
+stated future-work hypothesis --- that SPGD has ``potential to
+significantly enhance neural network training'' through ``improving
+convergence rates and navigating complex parameter spaces''
+\citep[Conclusion]{vahedi2024spgd} --- on a non-convex ML benchmark
+with documented saddle structure: low-rank Burer--Monteiro
+factorisation \citep{burer2003nonlinear} of the MovieLens-100K rating
+matrix \citep{harper2015movielens}.  The optimisation literature
+establishes that small-init Burer--Monteiro factorisation has a saddle
+near the origin that gradient descent escapes only slowly
+\citep{ge2016matrix,sun2018geometric}, exactly the regime SPGD's
+selection rule is designed for.
+
+\paragraph{Setup.}  We complete the rating matrix
+$M \in \mathbb{R}^{943 \times 1682}$ via $\widehat{M} = U V^{\top}$
+with $U \in \mathbb{R}^{943 \times 5}$ and
+$V \in \mathbb{R}^{1682 \times 5}$, minimising the L2-regularised
+mean-squared reconstruction error
+\begin{equation*}
+  \mathcal{L}(U, V) \;=\;
+    \frac{1}{|\Omega|} \sum_{(i,j) \in \Omega}
+      \bigl( (UV^{\top})_{ij} - r_{ij} \bigr)^{2}
+    \;+\; \lambda
+      \bigl( \overline{\|U\|^2} + \overline{\|V\|^2} \bigr)
+\end{equation*}
+on a random 80/20 train/test split of the $100{,}000$ observed
+entries, with $\lambda = 0.05$ applied identically to all four
+methods (a fairness control: without it, Adam overfits while
+SGD/SPGD enjoy implicit early-stopping regularisation).  The factors
+are initialised i.i.d.\ from $\mathcal{N}(0, 0.01^2)$, placing the
+iterate inside the saddle-rich neighbourhood of the origin.  We
+compare SGD, Adam, RPGD, and SPGD over $T{=}1500$ full-batch gradient
+evaluations across three seeds.  SPGD and RPGD use the verified
+optimiser classes from \texttt{src/spgd\_study/optimizers/},
+faithful to Algorithm~\ref{alg:spgd}: $\amp = 0.01$ per coordinate,
+Uniform$(-\amp, +\amp)$ candidates, $\np{=}8$, $\iterp{=}5$, and the
+paper's $\le$ acceptance rule (a candidate is committed only if its
+loss is no greater than that of the current iterate).
+
+\paragraph{Aggregate results.}  Table~\ref{tab:exp6-summary} reports
+the aggregate metrics.  All four methods land within $0.02$ test
+RMSE of one another.  Paired per-seed deltas
+(Figure~\ref{fig:exp6-paired}) place SPGD slightly ahead of SGD on
+training MSE (paired $\Delta = -0.0034$) but indistinguishable from
+RPGD on test RMSE ($\Delta = +0.0003$, sign mixed across seeds).
+
+\paragraph{Escape-time diagnostic (proposal Objective~3).}
+We define escape-time as the first step at which the training MSE has
+fallen $5\%$ below its initial value, the only setting in this study
+where the iterate sits inside a documented saddle plateau long enough
+for ``escape'' to have an objective definition (the proposal's
+escape-time is undefined in App.~\ref{app:two-moons},
+Exp~\ref{sec:exp4}, and App.~\ref{app:ablation}, where stagnation
+episodes are zero).  Per-method
+mean escape steps are
+\textbf{Adam $40 \pm 17$, SPGD $320 \pm 17$, RPGD $360 \pm 30$, SGD
+$370 \pm 17$}; paired per-seed deltas are
+\textbf{$\mathrm{SPGD} - \mathrm{SGD} = -50$ steps mean (per-seed:
+$-60, -30, -60$)} and
+\textbf{$\mathrm{SPGD} - \mathrm{RPGD} = -40$ steps mean (per-seed:
+$-30, -30, -60$)}: SPGD escapes the saddle plateau on \emph{every
+seed} ahead of both same-data baselines, but the lead is consumed by
+the time the methods converge.  Numbers are reproducible from
+\texttt{results/exp6\_escape\_time\_paired.json}.
+
+\paragraph{The acceptance-rate diagnostic.}
+The most informative number in this experiment is SPGD's
+perturbation acceptance rate:
+\textbf{$30 \pm 2\%$ across three seeds (88--97 of 299 perturbation
+phases produced a strictly improving candidate)}.  The matched random
+control RPGD accepts only $\bm{9 \pm 1\%}$ of phases, since a
+uniformly random pick from $\np{=}8$ candidates rarely lands on the
+argmin and rarely satisfies the $\le$ rule.  The threefold gap is
+direct evidence that SPGD's selection rule is firing as designed on a
+$13{,}125$-parameter non-convex ML problem --- the failure mode of a
+``silent'' SPGD that never accepts is ruled out by this diagnostic.
+
+\begin{table}[!htbp]
+\centering
+\small
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Method} & \textbf{Final train MSE} & \textbf{Test RMSE} &
+\textbf{Acceptance} & \textbf{Wall (s)} \\
+\midrule
+SGD   & $0.650 \pm 0.007$ & $0.949 \pm 0.007$ & ---           & $2.5$ \\
+Adam  & $0.596 \pm 0.002$ & $0.963 \pm 0.003$ & ---           & $2.8$ \\
+RPGD  & $0.649 \pm 0.002$ & $0.947 \pm 0.002$ & $9 \pm 1\%$   & $4.2$ \\
+SPGD  & $0.647 \pm 0.005$ & $0.948 \pm 0.002$ & $30 \pm 2\%$  & $4.2$ \\
+\bottomrule
+\end{tabular}
+\caption{Experiment~6 aggregate results.  MovieLens-100K rank-5
+         Burer--Monteiro matrix completion, $\lambda{=}0.05$, $1500$
+         full-batch steps, three seeds.  Acceptance is the fraction
+         of SPGD/RPGD perturbation phases that committed a candidate
+         (i.e.\ found a candidate satisfying the $\le$ acceptance
+         rule).  All four methods see the identical L2-regularised
+         loss inside their respective forward passes.}
+\label{tab:exp6-summary}
+\end{table}
+
+\begin{figure}[!htbp]
+\centering
+\includegraphics[width=\linewidth]{figures/exp6_mc_curves.png}
+\caption{Experiment~6 --- training MSE (left, log scale) and held-out
+         test RMSE (right) over $1500$ full-batch steps on
+         MovieLens-100K with rank-5 Burer--Monteiro factors initialised
+         at scale $0.01$ (mean $\pm 1$ std across three seeds).
+         SPGD's training loss reaches the $5\%$-drop escape threshold
+         a paired mean of $50$ steps before SGD and $40$ steps before
+         RPGD (3/3 seeds; see ``Escape-time diagnostic'' above); the
+         lead largely dissipates by the end of training.  Adam's training loss is lower throughout
+         but its test RMSE plateaus higher --- a classic mild-overfit
+         signature, despite identical L2 regularisation.}
+\label{fig:exp6-curves}
+\end{figure}
+
+\begin{figure}[!htbp]
+\centering
+\includegraphics[width=0.85\linewidth]{figures/exp6_mc_paired.png}
+\caption{Experiment~6 --- per-seed paired deltas of held-out test
+         RMSE between SPGD and the three baselines.  Negative bars
+         indicate SPGD ahead of the baseline on that seed.  SPGD beats
+         SGD on $2/3$ seeds (mean $\Delta = -0.0018$), is
+         statistically tied with RPGD ($\Delta = +0.0003$, sign mixed
+         across seeds), and beats Adam on $3/3$ seeds
+         ($\Delta = -0.0159$) --- the last margin is dominated by
+         Adam's mild overfit, not by SPGD's optimisation advantage.}
+\label{fig:exp6-paired}
+\end{figure}
+
+\paragraph{Interpretation.}
+SPGD's mechanism is empirically active on this benchmark --- the
+$30\%$ vs.\ $9\%$ acceptance gap is unambiguous evidence that the
+selection rule fires more often than chance and that the algorithm is
+running as the paper specifies.  However, the optimisation advantage
+this confers (a $50$-step paired-mean head-start over SGD, $40$ over
+RPGD, on the $5\%$-drop escape-time metric, 3/3 seeds) does
+\emph{not} translate into a measurable held-out generalisation gain: the test-RMSE gap to plain SGD is
+$-0.0018 \pm 0.005$ with the per-seed sign mixed, and the gap to RPGD
+is essentially zero.  Reading the paper's future-work claim
+empirically, our answer is split: the selection rule's mechanism
+\emph{does} generalise from 2D test functions to a high-dimensional
+non-convex ML problem (mechanism-active), but the ``significant
+enhancement'' the paper hypothesises does not materialise on this
+benchmark (effect-small).
+\FloatBarrier
+
+% ============================================================================
+\section{Conclusion}
+\label{sec:conclusion}
+
+This work is the first systematic empirical study of SPGD on
+machine-learning loss landscapes.  Across four discriminating
+testbeds --- analytic benchmarks ($d \in \{2,10,50\}$), five
+OpenML-CC18 tabular datasets, a CIFAR-10/ResNet-18 anchor experiment,
+and MovieLens-100K matrix completion --- SPGD's steepest-selection
+rule provides a measurable advantage over its same-mechanism
+random-perturbation control (RPGD).  The advantage is cleanest on
+CIFAR-10/ResNet-18: SPGD beats RPGD on all three seeds with a
+paired-mean delta of $+3.78$ percentage points test accuracy.  On
+matrix completion --- which directly tests the SPGD paper's stated
+NN-training hypothesis \citep[Conclusion]{vahedi2024spgd} --- the
+selection rule fires at threefold the rate of the random control
+($30\%$ vs.\ $9\%$ acceptance) and SPGD escapes the saddle plateau
+$50$ steps before SGD on all three seeds, but the held-out RMSE
+gap is within seed noise: mechanism-positive, generalisation-neutral.
+
+\paragraph{Caveats.}  No optimiser in our study exhibited sustained
+gradient stagnation at $\varepsilon = 10^{-3}$, so SPGD's CIFAR-10
+advantage cannot be attributed to plateau escape per se and likely
+reflects a more subtle benefit of biased candidate selection.
+Adam dominates absolute accuracy throughout because its adaptive
+preconditioning is structurally different; the correct head-to-head
+comparison is SPGD vs.\ same-compute random control, not SPGD vs.\
+Adam.  Three seeds at the CIFAR-10 scale is small, mitigated only
+by the paired protocol.
+
+\paragraph{Recommendation.}  Future perturbation-based optimisers
+should be benchmarked against a random-selection control of equal
+compute --- a comparison missing from much of the existing literature
+--- since on our deepest setting it is the \emph{selection rule},
+not perturbation alone, that does the useful work.
+
+% ============================================================================
+\clearpage
+\appendix
+\renewcommand{\thesection}{\Alph{section}}
+
+\begin{center}
+{\Large\bfseries Appendix}
+\end{center}
+
+\noindent The two appendix experiments are diagnostic only: Two Moons
+is a visualisation sanity check (the landscape is too benign to
+discriminate optimisers), and the $\np \times \iterp$ ablation runs
+on the same Two Moons setup so its accuracy heatmap is also
+non-discriminating.  We retain them for transparency with the
+proposal and because the figures expose secondary phenomena
+(geometric difference between Adam and the gradient methods;
+SPGD's compute--accuracy trade-off curve) that would otherwise be
+unsupported assertions in the main text.
+
+\vspace{0.6em}
+
+\section{Two Moons --- Visualisation Sanity Check (proposal Exp~2)}
+\label{app:two-moons}
+\label{sec:exp2}
+
+This experiment is a \emph{visualisation-only} diagnostic.  The
+dataset is benign enough that a $2 \to 32 \to 32 \to 1$ MLP solves it
+from any reasonable initialisation, so the saddle-escape mechanism
+SPGD targets does not engage and the optimisers' final test
+accuracies cluster within seed noise.  We retain the experiment in the
+appendix because (i) it verifies the paired-seed protocol on a small
+example, (ii) it reproduces \citet{vahedi2024spgd}'s
+trajectory-visualisation style on a neural network rather than a 2-D
+test function, and (iii) the resulting picture exposes a real
+geometric difference between adaptive and non-adaptive optimisers in
+weight space.  The head-to-head numbers reported in the main paper
+come from Exps~\ref{sec:exp1}, \ref{sec:exp4}, and~\ref{sec:exp6}.
+
+\paragraph{Setup.} A $2 \to 32 \to 32 \to 1$ MLP is trained on the
+\texttt{make\_moons} dataset (1{,}000 points, noise $0.2$) full-batch
+for 2{,}000 steps. Five optimisers, five seeds, 25 runs total.
+Following \citet{vahedi2024spgd}'s visualisation style, seed 0 of each
+optimiser additionally records its weight trajectory at every 10th
+step; we render the loss landscape in a \emph{shared} top-2 PCA basis
+(union of all five trajectories' displacements from $\theta_0$) with
+each optimiser's trajectory overlaid.  Centering on $\theta_0$ and
+sharing the basis means PC1 and PC2 mean the same thing in every
+panel and the paired-seed initialisation lands at $(0,0)$ everywhere.
+
+\paragraph{Results --- numbers.}  Final test accuracies
+(mean $\pm 1$ std across 5 seeds): Adam $0.977 \pm 0.010$,
+PGD $0.970 \pm 0.018$, SPGD $0.970 \pm 0.015$,
+RPGD $0.967 \pm 0.019$, SGD $0.966 \pm 0.019$.  The four gradient
+methods are within seed noise of each other; Adam wins for the
+well-known reason that adaptive scaling fits a benign basin
+quickly.  This experiment does not adjudicate SPGD vs.\ baselines.
+
+\paragraph{Results --- trajectories.}
+Figure~\ref{fig:exp2-landscape} is the visualisation showpiece.  Two
+features are robust across seeds: (i) the four gradient methods (SGD,
+PGD, RPGD, SPGD) all move predominantly along the shared PC2
+direction, while Adam moves substantially along PC1 --- a direct
+picture of adaptive scaling exploring directions the gradient methods
+do not preferentially use; (ii) SPGD's path is faintly serrated
+relative to SGD's, the small lateral excursions are SPGD's accepted
+perturbation candidates.  These are diagnostic observations about
+\emph{geometry}, not claims about \emph{which optimiser wins}.
+
+Figure~\ref{fig:exp2-loss} shows training-loss curves and
+Figure~\ref{fig:exp2-gradnorm} the gradient-norm history with the
+proposal's stagnation threshold $\varepsilon = 10^{-4}$ drawn for
+reference.  On this dataset the loss landscape is sufficiently benign
+that \emph{none} of the five optimisers exhibits sustained stagnation
+($\|\nabla f\| < 10^{-4}$ for $\geq 5$ consecutive steps); the
+``saddle escape'' mechanism is therefore not observable in the
+endpoint statistics here, only as the small trajectory feature noted
+above.
+
+\begin{figure}[!htbp]
+  \centering
+  \includegraphics[width=\linewidth]{figures/exp2_loss_landscape.png}
+  \caption{Two Moons training-BCE loss surface in a \emph{shared}
+           PCA basis (seed 0). PC1 and PC2 are the top-2 principal
+           directions of the union of weight displacements
+           $\theta(t) - \theta_0$ across all five optimisers, so every
+           panel projects onto the same 2-D plane through 1185-D weight
+           space. The colour map and white iso-loss contours show the
+           training BCE loss evaluated at $\theta_0 + a\,\mathbf{u} +
+           b\,\mathbf{v}$, clipped to the loss range the trajectories
+           actually visit (yellow = approaching the clip ceiling,
+           purple = low-loss basin). Contour levels are log-spaced so
+           the basin's structure is legible; an unclipped colour scale
+           would be dominated by the saturation strip on the left edge,
+           where weights at the boundary of the sweep grid push the
+           untrained-network BCE loss to $\sim$50. Green circle =
+           shared initialisation $\theta_0$ at the origin, red ``X'' =
+           final point, white curve = weight trajectory.  The geometric
+           reading: \emph{the four gradient methods all move
+           predominantly along PC2}, whereas \emph{Adam's trajectory
+           has substantial PC1 motion} --- per-parameter adaptive
+           scaling moves the iterate along a direction the gradient
+           methods do not preferentially explore. SPGD's white path is
+           faintly serrated relative to SGD's: those tiny lateral
+           excursions are SPGD's perturbation phases.}
+  \label{fig:exp2-landscape}
+\end{figure}
+
+\begin{figure}[!htbp]
+  \centering
+  \begin{subfigure}[t]{0.49\linewidth}
+    \includegraphics[width=\linewidth]{figures/exp2_loss_curves.png}
+    \caption{Training BCE loss (mean $\pm 1$ std across 5 seeds, log scale).}
+    \label{fig:exp2-loss}
+  \end{subfigure}\hfill
+  \begin{subfigure}[t]{0.49\linewidth}
+    \includegraphics[width=\linewidth]{figures/exp2_grad_norm_history.png}
+    \caption{Gradient-norm trajectories with the proposal's stagnation
+             threshold $\varepsilon = 10^{-4}$ drawn as a dashed line.}
+    \label{fig:exp2-gradnorm}
+  \end{subfigure}
+  \caption{Two Moons summary. Left: training loss; Adam pulls away
+           early. Right: $\|\nabla f\|_2$ vs.\ training step on log-$y$
+           --- no optimiser's gradient norm dips below the stagnation
+           threshold, which is why the stagnation episode count is
+           zero across all 25 runs.}
+  \label{fig:exp2-summary}
+\end{figure}
+\FloatBarrier
+
+\section{$\np \times \iterp$ Hyperparameter Ablation (proposal Exp~5)}
+\label{app:ablation}
+\label{sec:exp5}
+
+This appendix reports SPGD's sensitivity to its two perturbation
+hyperparameters.  The ablation runs on the same Two Moons setup as
+Appendix~\ref{app:two-moons}.  Because that landscape is
+non-discriminating (zero stagnation across all 25 main-experiment
+runs) the ablation similarly does not produce a saddle-escape
+signal --- every cell of the grid sees zero stagnation episodes ---
+and is consequently a hyperparameter-robustness diagnostic rather
+than a discriminating benchmark.  We retain it because the
+\emph{compute--accuracy trade-off} it reveals is independent of
+saddle structure.
+
+\paragraph{Setup.} Grid: $\np \in \{1, 5, 10, 20\}$ and
+$\iterp \in \{5, 10, 50, 100\}$, five seeds per cell, totalling 80
+runs.  Total candidate forward passes per run
+$= (n_{\text{steps}} / \iterp{}) \cdot \np{}$, which spans roughly
+$20$ to $8000$ across the grid (a $\sim 400\times$ compute range
+with all other hyper\-parameters fixed).
+
+\paragraph{Results.} Figure~\ref{fig:exp5-acc-loss} reports the mean
+test accuracy and final-training-loss heatmaps;
+Figure~\ref{fig:exp5-walltime} shows the corresponding wall-time
+heatmap.  Mean stagnation episodes are zero across the entire grid,
+so the stagnation heatmap is omitted as uninformative.  The accuracy
+heatmap is largely flat: SPGD on Two Moons is robust to the precise
+choice of \np{} and \iterp{} within reasonable bounds.  The
+final-loss heatmap shows a faint trend toward smaller \iterp{} (more
+frequent perturbation phases) reaching slightly lower training loss
+without a corresponding accuracy gain, consistent with SPGD finding
+broader basins rather than deeper ones.  The cheapest cell within
+$1\%$ of the best mean test accuracy identifies a practical operating
+regime that trades essentially no accuracy for a substantial reduction
+in candidate forward-pass cost.  The wall-time heatmap follows the
+predicted $(n_{\text{steps}}/\iterp{}) \cdot \np{}$ scaling, so when
+SPGD is deployed in a compute-budgeted setting, choosing $\np{}$ and
+$\iterp{}$ at the cheap-but-not-worst-accuracy corner of the heatmap
+is the natural recommendation.
+
+\begin{figure}[!htbp]
+  \centering
+  \begin{subfigure}[t]{0.49\linewidth}
+    \includegraphics[width=\linewidth]{figures/exp5_heatmap_acc.png}
+    \caption{Mean test accuracy.}
+    \label{fig:exp5-acc}
+  \end{subfigure}\hfill
+  \begin{subfigure}[t]{0.49\linewidth}
+    \includegraphics[width=\linewidth]{figures/exp5_heatmap_final_loss.png}
+    \caption{Mean final training loss.}
+    \label{fig:exp5-loss}
+  \end{subfigure}
+  \caption{Ablation heatmaps. Left: test accuracy is largely
+           insensitive to \np{} and \iterp{} within the explored
+           range, suggesting SPGD's hyper\-parameter choice is
+           forgiving on benign landscapes. Right: final BCE training
+           loss exposes a small but visible compute-quality trade-off
+           --- smaller \iterp{} reaches slightly lower training loss
+           --- which the accuracy view alone cannot resolve.}
+  \label{fig:exp5-acc-loss}
+\end{figure}
+
+\begin{figure}[!htbp]
+  \centering
+  \includegraphics[width=0.55\linewidth]{figures/exp5_heatmap_walltime.png}
+  \caption{Per-run wall time across the $\np \times \iterp$ grid. The
+           pattern follows the analytic prediction
+           $\propto (n_{\text{steps}}/\iterp{}) \cdot \np{}$. Choosing
+           the smallest \np{} and largest \iterp{} that does not
+           sacrifice accuracy is the practical recipe for cost-
+           effective SPGD.}
+  \label{fig:exp5-walltime}
+\end{figure}
+\FloatBarrier
+
+% ============================================================================
+\section*{Acknowledgments}
+The author thanks the WPI Academic Computing team for access to the
+Turing cluster, on which the CIFAR-10 anchor experiment was carried
+out. This work was completed in fulfillment of the final-project
+requirement of MA 551 (Computational Statistics) at Worcester
+Polytechnic Institute.
+
+% ---------- Bibliography ----------------------------------------------------
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+\end{document}

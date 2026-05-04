@@ -1,0 +1,38 @@
+# Experiment 1 — non-convex benchmark function validation
+# 5 optimizers x 3 functions x 3 dims x 30 seeds = 1350 runs
+#
+# Hyperparameters chosen as a *common, fair* setting per function:
+#   - SGD/PGD/RPGD/SPGD share the same lr per function so any difference in
+#     escape behavior is attributable to perturbation/selection, not step size.
+#   - Adam gets a higher lr because it normalizes per-parameter gradient stats.
+#   - amp is the perturbation half-width (Uniform(-amp, +amp)) per coordinate.
+#     Values match the SPGD paper's 2D benchmark settings.
+#   - n_p, iter_p match the paper's experiments (10 candidates every 5 steps).
+
+n_seeds: 30
+n_steps: 1000
+eps_converged: 0.01      # success: best loss within eps of optimum_f
+stagnation_eps: 1.0e-4   # ||grad||_2 below this counts as a stagnation step
+
+functions: [rastrigin, ackley, rosenbrock]
+dims: [2, 10, 50]
+
+optimizers:
+  sgd:
+    lr_per_function:  { rastrigin: 5.0e-3, ackley: 1.0e-2, rosenbrock: 1.0e-3 }
+  adam:
+    lr_per_function:  { rastrigin: 5.0e-2, ackley: 1.0e-1, rosenbrock: 1.0e-2 }
+  pgd:
+    lr_per_function:  { rastrigin: 5.0e-3, ackley: 1.0e-2, rosenbrock: 1.0e-3 }
+    amp_per_function: { rastrigin: 2.5,    ackley: 2.5,    rosenbrock: 1.0 }
+    iter_p: 5
+  rpgd:
+    lr_per_function:  { rastrigin: 5.0e-3, ackley: 1.0e-2, rosenbrock: 1.0e-3 }
+    amp_per_function: { rastrigin: 2.5,    ackley: 2.5,    rosenbrock: 1.0 }
+    n_p: 10
+    iter_p: 5
+  spgd:
+    lr_per_function:  { rastrigin: 5.0e-3, ackley: 1.0e-2, rosenbrock: 1.0e-3 }
+    amp_per_function: { rastrigin: 2.5,    ackley: 2.5,    rosenbrock: 1.0 }
+    n_p: 10
+    iter_p: 5

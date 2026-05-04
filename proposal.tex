@@ -1,0 +1,98 @@
+\documentclass[11pt]{article}
+\usepackage[margin=0.4in]{geometry}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{titlesec}
+\usepackage{parskip}
+\usepackage{booktabs}
+
+\titlespacing*{\section}{0pt}{8pt}{4pt}
+\titlespacing*{\subsection}{0pt}{6pt}{3pt}
+
+\setlength{\parskip}{4pt}
+\setlength{\parindent}{0pt}
+
+\hypersetup{colorlinks=true, linkcolor=blue, urlcolor=blue, citecolor=blue}
+
+\begin{document}
+
+\begin{center}
+    {\large \textbf{Project Proposal -- Empirical Analysis of Saddle-Point Escaping Optimizers on Non-Convex ML Loss Landscapes}}\\[4pt]
+    Shyam Patadia \quad \texttt{spatadia@wpi.edu}\\
+    MA 551 Computational Statistics
+\end{center}
+
+\section{Introduction}
+
+Training a machine learning model is fundamentally an optimization problem: minimize a loss function $f(\theta)$ over a high-dimensional, non-convex parameter space. In practice, neural network loss landscapes are riddled with saddle points -- critical points where the gradient vanishes but the point is neither a minimum nor a maximum -- and flat plateau regions where gradients are near-zero and learning stalls. In high dimensions, saddle points vastly outnumber local minima, making them the dominant obstacle in deep learning optimization.
+
+A recent algorithm, Steepest Perturbed Gradient Descent (SPGD) \cite{vahedi2024spgd}, proposes a principled escape mechanism: every $\textit{IterP}$ iterations, generate $N_P$ uniformly perturbed candidate solutions around the current point and select the one yielding the steepest loss decrease. This combines the directed efficiency of gradient descent with a Monte Carlo exploration strategy. However, SPGD has only been evaluated on mathematical benchmark functions and a 3D engineering problem; its behavior on ML loss landscapes is entirely unexplored. This project provides the first systematic empirical study of SPGD on ML tasks, comparing it against established optimizers under controlled conditions.
+
+\section{Problem Description}
+
+Standard optimizers -- SGD, Adam, and their variants -- rely solely on gradient information. Near saddle points, gradients approach zero, causing these methods to stall for many iterations with negligible progress. Perturbed Gradient Descent (PGD) \cite{jin2017escape} adds random noise to escape such regions but treats all perturbation directions equally. SPGD's steepest-selection rule is more principled: it evaluates $N_P$ candidates and selects the most promising one. Whether this selection strategy provides a meaningful advantage over simpler perturbation approaches -- and under what conditions -- is an open empirical question with direct implications for ML practitioners choosing optimizers for non-convex problems.
+
+\section{Objectives}
+
+\begin{enumerate}[leftmargin=*, itemsep=2pt, topsep=2pt]
+    \item Implement SPGD as a PyTorch \texttt{Optimizer} subclass and validate it on non-convex benchmark functions (Rastrigin, Ackley, Rosenbrock) at $d \in \{2, 10, 50\}$.
+    \item Compare SPGD against SGD, Adam, PGD, and a random-perturbation baseline across four datasets spanning synthetic, tabular, and vision settings.
+    \item Diagnose saddle-point behavior through gradient-norm stagnation episodes and escape-time measurements to determine when and why SPGD outperforms competing methods.
+    \item Characterize SPGD's sensitivity to $N_P$ and $\textit{IterP}$ via ablation on the Two Moons dataset.
+\end{enumerate}
+
+\section{Datasets and Experiments}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{@{}llllr@{}}
+\toprule
+\textbf{Dataset} & \textbf{Type} & \textbf{Size} & \textbf{What it isolates} & \textbf{Est.\ compute} \\
+\midrule
+Rastrigin / Ackley / Rosenbrock & Synthetic & Generated & Benchmark validation, visual trajectories & $<$1 min \\
+Two Moons (\texttt{sklearn}) & Synthetic 2D & 1{,}000 & Visual saddle escape, loss landscape plot & $<$5 min \\
+OpenML-CC18 tabular subset & Real tabular & 500--50k & Real-world generalization, 5 datasets & $<$20 min \\
+CIFAR-10 (\texttt{torchvision}) & Real images & 60{,}000 & Scale stress test, practical convergence & $\sim$2 hrs \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection*{Experiment 1 -- Benchmark Function Validation (Week 1)}
+
+SPGD is validated on Rastrigin ($f(x) = An + \sum[x_i^2 - A\cos(2\pi x_i)]$), Ackley, and Rosenbrock functions at $d \in \{2, 10, 50\}$ with 30 random initializations per optimizer. These functions have known global optima and well-characterized saddle/local-minima structure. Metrics: final function value, iterations to convergence, and success rate (fraction of runs reaching within $\epsilon = 0.01$ of the global optimum). 2D trajectory plots visualize SPGD escaping local minima that trap vanilla GD.
+
+\subsection*{Experiment 2 -- Two Moons: Visual Saddle Analysis (Week 2)}
+
+A small MLP (2$\to$32$\to$32$\to$1, no batch normalization) is trained on Two Moons for 2{,}000 steps across all five optimizers with 5 random seeds. The loss landscape is visualized by sweeping two weight dimensions and plotting the surface alongside optimizer trajectories. Stagnation episodes -- consecutive steps where $\|\nabla f\| < 10^{-4}$ -- are counted per optimizer. This is the primary visual experiment, producing the most interpretable figure in the paper.
+
+\subsection*{Experiment 3 -- OpenML Tabular: Real-Data Generalization (Week 2)}
+
+Five tabular classification datasets are drawn from the OpenML-CC18 benchmark suite (\texttt{pip install openml}), selected with $n \in [500, 50{,}000]$ rows and $p \in [10, 100]$ features. A 3-layer MLP is trained on each dataset for all five optimizers across 3 seeds. Metrics: training loss convergence, stagnation episode count, and test accuracy. This experiment tests whether SPGD's advantage observed on synthetic problems transfers to real heterogeneous tabular data.
+
+\subsection*{Experiment 4 -- CIFAR-10: Scale Stress Test (Weeks 3--4)}
+
+A ResNet-18 (11M parameters, no batch normalization in early layers to preserve saddle structure) is trained on CIFAR-10 for 50 epochs across all five optimizers with 3 seeds. This is the anchor experiment. Metrics: training loss curve, gradient norm over time, stagnation episode count, final test accuracy, and sharpness at convergence (loss increase under small weight perturbation $\delta = 0.01$, following the flat-minima hypothesis). Total GPU time: approximately 2 hours on an RTX 4050.
+
+\subsection*{Experiment 5 -- Ablation on $N_P$ and $\textit{IterP}$ (Week 4)}
+
+A $4 \times 4$ grid over $N_P \in \{1, 5, 10, 20\}$ and $\textit{IterP} \in \{5, 10, 50, 100\}$ is run on Two Moons (16 combinations $\times$ 5 seeds = 80 runs, each under 5 seconds). The result is a heatmap of final test accuracy and stagnation count, identifying the practical operating regime for SPGD.
+
+\section{Approach and Methodology}
+
+\textbf{Implementation.} SPGD is implemented as a PyTorch \texttt{Optimizer} subclass. Every $\textit{IterP}$ steps, $N_P$ candidates are sampled by adding uniform perturbations $\delta \sim \text{Uniform}(-r, r)^d$ to current parameters. The candidate with the largest loss decrease is accepted; otherwise the standard gradient step is taken. The random-perturbation baseline uses the same mechanism but selects the candidate randomly rather than by steepest descent, isolating the contribution of SPGD's selection rule.
+
+\textbf{Diagnostics.} Stagnation episodes (steps with $\|\nabla f\| < \varepsilon$) and escape times are logged at zero cost inside the training loop. These diagnostics directly measure saddle-point behavior rather than inferring it from loss curves alone.
+
+\textbf{Reproducibility.} All experiments use fixed random seeds. Total compute across all experiments is under 3 hours on an RTX 4050.
+
+
+\begin{thebibliography}{9}
+\bibitem{vahedi2024spgd}
+A.~M.~Vahedi and H.~T.~Ilies, ``SPGD: Steepest Perturbed Gradient Descent Optimization,'' \textit{arXiv:2411.04946}, 2024.
+
+\bibitem{jin2017escape}
+C.~Jin, R.~Ge, P.~Netrapalli, S.~M.~Kakade, and M.~I.~Jordan, ``How to Escape Saddle Points Efficiently,'' \textit{ICML}, 2017.
+\end{thebibliography}
+
+\end{document}

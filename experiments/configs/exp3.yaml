@@ -1,0 +1,43 @@
+# Experiment 3 — OpenML-CC18 tabular classification
+# 5 datasets x 5 optimizers x 3 seeds = 75 full-batch training runs.
+# All datasets are in the proposal's [500, 50k] rows x [10, 100] features range,
+# spanning binary and multiclass to test SPGD across loss-surface types.
+
+n_seeds: 3
+n_steps: 1000
+test_frac: 0.2
+
+hidden: 64
+n_hidden: 3            # 3 hidden Linear layers + 1 output Linear (proposal's "3-layer MLP")
+
+stagnation_eps: 1.0e-3
+
+datasets:
+  - { name: credit-g, openml_id: 31,   note: "1000 rows, ~20 attrs (mostly cat), binary" }
+  - { name: kc1,      openml_id: 1067, note: "2109 rows, 21 numeric, binary" }
+  - { name: spambase, openml_id: 44,   note: "4601 rows, 57 numeric, binary" }
+  - { name: segment,  openml_id: 36,   note: "2310 rows, 16 numeric, multiclass-7" }
+  - { name: vehicle,  openml_id: 54,   note: "846 rows, 18 numeric, multiclass-4" }
+
+# All gradient methods share lr; Adam gets a smaller lr because it normalizes
+# per-parameter gradient stats internally. amp tuned to ~1/3 typical Kaiming
+# weight magnitude at hidden=64 (~1/sqrt(64)=0.125 -> amp 0.05).
+optimizers:
+  sgd:
+    lr: 1.0e-2
+  adam:
+    lr: 1.0e-3
+  pgd:
+    lr: 1.0e-2
+    amp: 0.05
+    iter_p: 50
+  rpgd:
+    lr: 1.0e-2
+    amp: 0.05
+    n_p: 10
+    iter_p: 50
+  spgd:
+    lr: 1.0e-2
+    amp: 0.05
+    n_p: 10
+    iter_p: 50

@@ -1,0 +1,247 @@
+================================================================================
+EXPERIMENT 4 -- CIFAR-10 / RESNET-18 ANCHOR EXPERIMENT
+Summary of all 15 runs (5 optimizers x 3 seeds, 50 epochs each)
+================================================================================
+Project   : SPGD Empirical Study (MA 551, Shyam Patadia)
+Cluster   : WPI Turing, partition=academic
+Submitted : 2026-04-28 22:43 EDT
+Completed : 2026-04-28 23:47 EDT     (wall-clock: ~64 minutes for the full sweep)
+Slurm job : 1989564 (array 0-14)
+Hardware  : 2 x NVIDIA A30 (24 GB), driver 570.133.20, CUDA 12.1
+Nodes used: gpu-4-21.int.turing.wpi.edu, gpu-4-23.int.turing.wpi.edu
+Run by    : spatadia@turing.wpi.edu
+
+================================================================================
+1. INITIAL EXPECTATIONS  (from proposal.tex / PROJECT_PLAN.txt)
+================================================================================
+
+Stated hypothesis (proposal section 3 / 4):
+  H1. Standard optimizers (SGD/Adam) stall near saddle points; SPGD's
+      steepest-perturbation rule should escape them faster than vanilla
+      perturbation (PGD) and faster than random selection (RPGD).
+  H2. The selection rule -- not perturbation alone -- is what matters.
+      Operationally: SPGD > RPGD on test accuracy AND/OR stagnation episodes.
+  H3. ResNet-18 with batch-norm DISABLED in [layer1, layer2] preserves
+      enough saddle structure for the saddle-escape mechanism to matter.
+
+Acceptance criteria (PROJECT_PLAN.txt section 4):
+  AC1. ResNet-18 SGD baseline reaches >= 0.90 test accuracy at 50 epochs.
+  AC2. All 15 jobs complete on Turing without crashing.
+
+Compute estimate from proposal:
+  ~2 hours per run on RTX 4050  ->  ~30 GPU-hours total.
+
+Diagnostic of interest:
+  Stagnation episodes = consecutive minibatch steps with ||grad|| < 1e-3.
+  Non-zero counts indicate plateau/saddle traversal; SPGD is expected to
+  show fewer or shorter episodes than SGD/Adam.
+
+Risk register hits relevant here (PROJECT_PLAN section 5):
+  R2. ResNet-18 + SPGD may diverge if amp too large       -> monitor
+  R5. 3 seeds is small; report mean +/- std AND paired    -> applied below
+
+================================================================================
+2. RUN CONFIGURATION  (experiments/configs/exp4.yaml)
+================================================================================
+Model            : ResNet-18, 11,172,170 parameters
+                   BN layers DISABLED in: [layer1, layer2]   (proposal: preserve saddles)
+Dataset          : CIFAR-10, 50,000 train / 10,000 test
+Batch size       : 128 (train), 256 (test)
+Epochs           : 50
+Steps/epoch      : 391  ->  total minibatch steps per run: 19,550
+Loss             : cross-entropy
+Stagnation eps   : 1.0e-3 (threshold on ||grad|| per minibatch)
+Seeds            : {0, 1, 2}
+
+Optimizer hyperparameters:
+  sgd   : lr=1e-2
+  adam  : lr=1e-3
+  pgd   : lr=1e-2, amp=1e-3, iter_p=200
+  rpgd  : lr=1e-2, amp=1e-3, iter_p=200, n_p=5
+  spgd  : lr=1e-2, amp=1e-3, iter_p=200, n_p=5
+
+Note on amp scaling: amp=1e-3 was chosen to be small relative to Kaiming-init
+weight magnitude (~1/sqrt(fan_in) ~ 0.05).  A perturbation that is ~2% of
+typical weight magnitude is meant to be exploratory but non-destructive.
+
+================================================================================
+3. PER-RUN RESULTS  (15 rows; sorted by Slurm array index)
+================================================================================
+Array index -> (opt, seed) map:
+   0  sgd  s0     5  adam s2    10  rpgd s1
+   1  sgd  s1     6  pgd  s0    11  rpgd s2
+   2  sgd  s2     7  pgd  s1    12  spgd s0
+   3  adam s0     8  pgd  s2    13  spgd s1
+   4  adam s1     9  rpgd s0    14  spgd s2
+
+idx | opt   sd | host       | wall(s) | final loss | test acc | stagnation
+----+----------+------------+---------+------------+----------+-----------
+  0 | sgd   s0 | gpu-4-23   |  451.4  |   0.2814   |  0.8491  |  0
+  1 | sgd   s1 | gpu-4-21   |  449.7  |   0.1995   |  0.8159  |  0
+  2 | sgd   s2 | gpu-4-23   |  451.8  |   0.2668   |  0.8154  |  0
+  3 | adam  s0 | gpu-4-21   |  463.1  |   0.0540   |  0.9119  |  0
+  4 | adam  s1 | gpu-4-23   |  465.5  |   0.0969   |  0.8862  |  0
+  5 | adam  s2 | gpu-4-21   |  463.2  |   0.2070   |  0.9063  |  0
+  6 | pgd   s0 | gpu-4-23   |  455.8  |   0.3211   |  0.8245  |  0
+  7 | pgd   s1 | gpu-4-21   |  452.5  |   0.3175   |  0.8061  |  0
+  8 | pgd   s2 | gpu-4-23   |  449.9  |   0.2933   |  0.7966  |  0
+  9 | rpgd  s0 | gpu-4-23   |  459.0  |   0.3218   |  0.8045  |  0
+ 10 | rpgd  s1 | gpu-4-23   |  454.8  |   0.2666   |  0.8265  |  0
+ 11 | rpgd  s2 | gpu-4-23   |  460.1  |   0.4230   |  0.7387  |  0
+ 12 | spgd  s0 | gpu-4-23   |  456.5  |   0.3152   |  0.8487  |  0
+ 13 | spgd  s1 | gpu-4-23   |  460.6  |   0.2398   |  0.8379  |  0
+ 14 | spgd  s2 | gpu-4-21   |  461.4  |   0.3240   |  0.7964  |  0
+
+All 15 runs completed successfully (exit code 0, no NaNs, no OOM).
+Stagnation episodes: 0 / 19,550 steps for ALL 15 runs.   <-- key finding
+
+================================================================================
+4. AGGREGATE METRICS BY OPTIMIZER  (mean +/- std over 3 seeds)
+================================================================================
+
+opt    | test accuracy        | final train loss     | wall time (s)
+-------+----------------------+----------------------+-------------------
+sgd    |  0.8268 +/- 0.0193   |  0.2492 +/- 0.0437   |  450.9 +/- 1.1
+adam   |  0.9015 +/- 0.0135   |  0.1193 +/- 0.0789   |  463.9 +/- 1.4
+pgd    |  0.8091 +/- 0.0142   |  0.3106 +/- 0.0152   |  452.7 +/- 3.0
+rpgd   |  0.7899 +/- 0.0457   |  0.3372 +/- 0.0793   |  458.0 +/- 2.8
+spgd   |  0.8277 +/- 0.0276   |  0.2930 +/- 0.0463   |  459.5 +/- 2.6
+
+Ranking by mean test accuracy:  adam > spgd ~ sgd > pgd > rpgd
+Ranking by mean train loss   :  adam < sgd < spgd < pgd < rpgd
+
+Wall-time overhead of perturbation methods over SGD:
+  pgd  : +0.4%   (~2 s per run; one extra Gaussian-noise step every 200 steps)
+  rpgd : +1.6%   (~7 s ; n_p=5 candidate forwards every 200 steps)
+  spgd : +1.9%   (~9 s ; n_p=5 candidate forwards every 200 steps + selection)
+
+The candidate-evaluation overhead is small because perturbation phases happen
+only every iter_p=200 steps (about 98 phases per 50-epoch run).
+
+================================================================================
+5. PAIRED COMPARISONS BY SEED  (SAME init seed, just optimizer swapped)
+================================================================================
+The five optimizers all start from the same model parameters when given the
+same seed, so paired (per-seed) deltas are the most powerful comparison
+available with only 3 seeds.
+
+seed | SPGD test acc | RPGD test acc | SPGD - RPGD | SGD test acc | SPGD - SGD
+-----+---------------+---------------+-------------+--------------+-----------
+ 0   |    0.8487     |    0.8045     |   +0.0442   |    0.8491    |  -0.0004
+ 1   |    0.8379     |    0.8265     |   +0.0114   |    0.8159    |  +0.0220
+ 2   |    0.7964     |    0.7387     |   +0.0577   |    0.8154    |  -0.0190
+mean |               |               |   +0.0378   |              |  +0.0009
+
+Interpretation:
+  - SPGD beats RPGD on ALL 3 seeds (mean +3.78 percentage points).
+    This is consistent with hypothesis H2: the steepest-selection rule
+    contributes meaningful signal beyond random perturbation.
+  - SPGD ties SGD overall (mean +0.09 pp): the perturbation mechanism
+    does not help relative to vanilla SGD when there are no plateaus
+    to escape (see findings below).
+  - The SPGD>RPGD gap is the cleanest evidence in this experiment that
+    *selection* matters; without that comparison one would conclude
+    perturbation is harmful (PGD/RPGD < SGD).
+
+================================================================================
+6. FINDINGS vs INITIAL EXPECTATIONS
+================================================================================
+
+[F1]  ZERO STAGNATION EPISODES across all 15 runs.   (NULL on saddle hypothesis)
+      Expected: SGD/Adam show non-zero stagnation; SPGD shows fewer.
+      Observed: nobody hits ||grad|| < 1e-3 for any consecutive window.
+      Likely cause: ResNet-18 with BN disabled only in {layer1, layer2}
+      still has BN in {layer3, layer4} + 2x downsample shortcuts.  These
+      surviving normalization paths keep gradient magnitudes well above
+      the 1e-3 threshold.  CIFAR-10's loss landscape, even with this
+      handicap, is too well-conditioned at lr=1e-2 for plateau traversal
+      to be observable at this granularity.
+      Implication for the report: state this explicitly.  The proposal's
+      "preserve saddle structure" intervention was insufficient.  Either
+      (a) lower stagnation_eps to ~1e-2, (b) disable BN globally, or
+      (c) switch to a network/dataset where saddles are known to dominate.
+
+[F2]  SPGD's SELECTION RULE TRANSFERS TO REAL DATA.        (supports H2)
+      SPGD - RPGD = +3.78 pp test accuracy, paired across all 3 seeds.
+      This mirrors Exp 1 (d=10 Ackley) where SPGD-vs-random showed a clear
+      mean improvement, and Exp 3 OpenML where the same pattern held on
+      tabular data.  CIFAR-10 + ResNet-18 is the largest-scale evidence
+      we have that selection >= random perturbation, even when there are
+      no overt saddles to escape.
+
+[F3]  PERTURBATION ALONE HURTS ON THIS LANDSCAPE.          (informs Discussion)
+      PGD (mean acc 0.809) and RPGD (mean 0.790) are BOTH below SGD
+      (mean 0.827).  Adding noise to a smooth, fast-converging landscape
+      degrades the optimizer.  SPGD partially recovers because the
+      selection rule rejects bad candidates; RPGD has no such filter.
+
+[F4]  ADAM IS THE STRONGEST OPTIMIZER HERE.                (expected)
+      Mean test accuracy 0.9015 -- the only optimizer to clear AC1 = 0.90.
+      With Kaiming initialization and no momentum on the others, Adam's
+      adaptive per-parameter step size dominates.  This does NOT
+      contradict H1/H2 -- the proposal's claim is about saddle escape,
+      not asymptotic accuracy on a saddle-free landscape.
+
+[F5]  ACCEPTANCE CRITERION AC1 NOT MET FOR SGD.           (caveat to discuss)
+      SGD: 0.8268 (target was >= 0.90).
+      Reason: the proposal-mandated handicaps -- no momentum on SGD/PGD/
+      RPGD/SPGD, BN disabled in early layers -- intentionally sacrifice
+      asymptotic accuracy to preserve saddle structure (which then
+      didn't show up; see F1).  The handicaps work as designed for the
+      controlled comparison; they just shift the absolute-accuracy bar.
+
+[F6]  COMPUTE BUDGET BEAT THE ESTIMATE BY ~16x.            (good news)
+      Estimated   : ~2 h per run on RTX 4050  -> ~30 GPU-h total.
+      Actual A30  : ~7.6 min per run          -> ~1.9 GPU-h total.
+      With 2 A30s in parallel + 5-minute pre-emption gaps between array
+      tasks, the entire 15-run sweep finished in 64 minutes wall-clock.
+
+================================================================================
+7. WHAT THE LOSS CURVES LOOK LIKE  (per-step extracts; full curves in JSON)
+================================================================================
+Sanity reference: starting loss ~ ln(10) ~ 2.30 (random 10-way classifier).
+
+Per-optimizer first-step / first-1% / last-5% mean loss (averaged over seeds):
+  sgd   :  step 0 ~ 2.353   first-1% ~ 1.957   last-5% ~ 0.283
+  adam  :  step 0 ~ 2.353   first-1% ~ 1.667   last-5% ~ 0.058
+  pgd   :  step 0 ~ 2.353   first-1% ~ 1.957   last-5% ~ 0.292
+  rpgd  :  step 0 ~ 2.353   first-1% ~ 1.958   last-5% ~ 0.284
+  spgd  :  step 0 ~ 2.353   first-1% ~ 1.959   last-5% ~ 0.290
+
+Adam pulls away within the first 1% of steps; SGD/PGD/RPGD/SPGD track each
+other almost identically through training, with the perturbation methods
+converging slightly above SGD's final loss.
+
+================================================================================
+8. WHAT'S NOT IN THESE RESULTS  (deferred to plot_exp4.py / Step 7 / report)
+================================================================================
+The 15 JSONs in results_cifar/ contain:
+  - per-step training loss (19,550 values per run)
+  - per-step gradient-norm tracking (used to detect stagnation)
+  - final test accuracy
+  - stagnation episode counts and durations
+
+Things we still need to compute / produce for the report:
+  (a) figures/exp4_loss_curves.pdf      -- 5 panels, mean +/- 1sd over seeds
+  (b) figures/exp4_test_acc.pdf         -- bar chart with seed scatter
+  (c) figures/exp4_grad_norm.pdf        -- gradient norm vs step on log-y;
+                                           visualize that no curve dips below
+                                           the 1e-3 stagnation threshold.
+  (d) figures/exp4_sharpness_vs_acc.pdf -- proposal lists sharpness at
+                                           convergence; not measured in this
+                                           sweep, would need a second pass
+                                           with a perturb-and-evaluate script.
+  (e) ablation followup: re-run a subset with stagnation_eps=1e-2 to see
+                         if F1 changes (low cost; one extra array job).
+
+================================================================================
+9. ONE-LINE SUMMARY FOR THE REPORT ABSTRACT
+================================================================================
+On CIFAR-10 / ResNet-18 (BN disabled in early stages, 50 epochs, 3 seeds),
+SPGD beat the same-mechanism random-selection baseline (RPGD) by 3.78 pp test
+accuracy paired across all seeds, supporting the claim that the steepest
+candidate rule contributes meaningful signal; however, no optimizer recorded
+a single stagnation episode (||grad|| < 1e-3), so the saddle-escape mechanism
+the proposal targeted did not measurably engage on this landscape, and Adam's
+adaptive step (mean acc 0.9015) outperformed all gradient+perturbation methods.
+================================================================================

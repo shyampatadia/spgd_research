@@ -1,0 +1,31 @@
+# Experiment 5 — N_P x IterP ablation on Two Moons (SPGD only)
+# 4 x 4 = 16 hyperparameter cells; 5 seeds per cell -> 80 runs total.
+# Each run is full-batch SPGD on Two Moons for 2000 steps (~5 sec on CPU).
+#
+# The Two Moons setup mirrors Experiment 2 (same data, same MLP, same lr/amp),
+# so the ablation isolates the effect of N_P and IterP without confounding
+# from learning-rate or amplitude choices.
+
+n_seeds: 5
+n_steps: 2000
+n_samples: 1000
+noise: 0.2
+test_frac: 0.2
+
+hidden: 32
+n_hidden: 2
+
+stagnation_eps: 1.0e-4   # matches proposal's Two Moons threshold (was 1.0e-3)
+
+# Fixed SPGD hyperparameters (match exp2.yaml so the ablation is comparable
+# to the headline Two Moons run).
+lr:  5.0e-2
+amp: 0.05
+
+# Ablation grid.
+# n_p     = number of perturbation candidates per phase (compute scales linearly).
+# iter_p  = perturbation phase fires every iter_p gradient steps (smaller -> more frequent).
+# Total candidate forward passes per run = (n_steps / iter_p) * n_p.
+# The grid spans roughly 2 -> 8000 candidate evals per run (~4000x compute range).
+n_p_grid:    [1, 5, 10, 20]
+iter_p_grid: [5, 10, 50, 100]

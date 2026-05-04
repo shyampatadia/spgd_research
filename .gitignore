@@ -1,0 +1,66 @@
+# --- Python / uv -----------------------------------------------------------
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.python-version
+build/
+dist/
+
+# --- Caches ----------------------------------------------------------------
+.mypy_cache/
+.pytest_cache/
+.ipynb_checkpoints/
+.ruff_cache/
+
+# --- Project caches / large data ------------------------------------------
+data/cache/
+.openml_cache/
+.cifar10_cache/
+.movielens_cache/
+*.tar.gz
+*.zip
+
+# --- Cluster artifacts -----------------------------------------------------
+slurm-*.out
+*.err
+*.log
+
+# --- OS / editor -----------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.swp
+settings.local.json
+.claude/
+
+# --- Internal / private ----------------------------------------------------
+instructions/
+logs_cifar/
+PROJECT_PLAN.txt
+
+# --- Report directory: only ship sources, not build artefacts -------------
+report/*
+!report/report.tex
+!report/presentation.tex
+!report/presentation_script.md
+!report/references.bib
+
+# --- Third-party paper sources (copyright) --------------------------------
+spgd_paper/
+
+# --- All PDFs except the approved proposal --------------------------------
+*.pdf
+!computational_statistics_proposal.pdf
+
+# --- Bulky regenerable trajectory dumps in results/ -----------------------
+# Keep CSVs and small summary JSONs; drop the multi-MB trajectory blobs.
+results/exp1_trajectories_2d.json
+results/exp1_convergence_curves.json
+results/exp2_weights_history.npz
+
+
+turing/git_init_and_push.txt

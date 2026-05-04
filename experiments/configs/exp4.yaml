@@ -1,0 +1,42 @@
+# Experiment 4 — CIFAR-10 / ResNet-18 anchor experiment
+# 5 optimizers x 3 seeds = 15 runs at 50 epochs each (cluster).
+# For local sanity validation, use --epochs 1 on the CLI.
+
+n_seeds: 3
+n_epochs: 50
+batch_size: 128
+test_batch_size: 256
+num_workers: 2
+log_every: 200          # print one status line every N minibatches
+
+# ResNet-18 with BN disabled in early stages (proposal: preserve saddle structure)
+disable_bn_layers: [layer1, layer2]
+num_classes: 10
+
+stagnation_eps: 1.0e-3   # ||grad|| threshold per minibatch step
+
+# Hyperparameters: SGD/PGD/RPGD/SPGD share lr (no momentum, to keep the
+# selection-rule comparison clean against vanilla GD-style updates).
+# Adam uses its standard CIFAR-10 lr. amp=1e-3 is much smaller than the
+# benchmark / Two Moons settings because ResNet-18 has Kaiming-initialized
+# weights at scale ~1/sqrt(fan_in) ~ 0.05; perturbation should be a small
+# fraction of typical weight magnitude. iter_p=200 -> ~once per half-epoch.
+optimizers:
+  sgd:
+    lr: 1.0e-2
+  adam:
+    lr: 1.0e-3
+  pgd:
+    lr: 1.0e-2
+    amp: 1.0e-3
+    iter_p: 200
+  rpgd:
+    lr: 1.0e-2
+    amp: 1.0e-3
+    n_p: 5            # smaller than synthetic n_p=10 because each candidate
+    iter_p: 200       # is a full ResNet forward pass on a 128-image batch
+  spgd:
+    lr: 1.0e-2
+    amp: 1.0e-3
+    n_p: 5
+    iter_p: 200

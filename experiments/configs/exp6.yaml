@@ -1,0 +1,35 @@
+# Experiment 6: SPGD vs SGD/Adam/RPGD on non-convex matrix completion
+# (MovieLens-100K, rank-r Burer-Monteiro factorization, L2-regularised).
+#
+# This run uses the verified SPGD and RPGD optimiser classes from
+# src/spgd_study/optimizers/, faithful to Algorithm 1 of Vahedi & Ilies
+# (2024): Uniform(-amp, +amp) per-coordinate perturbations, candidates
+# evaluated against f(x_i), accept argmin iff min <= f(x_i), perturbation
+# phase BEFORE the gradient step.
+
+seed: 0
+n_seeds: 3
+
+# data
+test_frac: 0.2
+
+# rank-r Burer-Monteiro factorization
+rank: 5
+init_scale: 0.01
+
+# optimization
+n_steps: 1500
+log_every: 30
+lr_sgd: 10.0          # mean-loss compensation: per-element grad ~ O(1/|Omega|)
+lr_adam: 0.005        # Adam normalises by sqrt(v_hat) -> scale-invariant lr
+lr_spgd: 10.0         # SPGD's gradient leg uses the same lr as SGD
+l2_reg: 0.05          # FAIR L2 weight applied identically to all four methods
+adam_beta1: 0.9
+adam_beta2: 0.999
+adam_eps: 1.0e-8
+
+# SPGD / RPGD perturbation phase (paper-faithful)
+amp: 0.01             # constant per-coordinate Uniform half-width
+                      # (matching init_scale; tune up if SPGD never accepts)
+n_p: 8                # candidates per perturbation phase
+iter_p: 5             # paper used 5

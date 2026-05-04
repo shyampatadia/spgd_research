@@ -1,0 +1,95 @@
+================================================================================
+EXPERIMENT 4 — FILE TRANSFER COMMANDS  (local Windows bash  ->  Turing)
+================================================================================
+All commands are run from the LOCAL project root in bash:
+    cd /d/DATA_SCIENCE_2025/semester2/computational_statistics/final_project
+
+Edit these two lines once at the top of your shell session, then everything
+below is copy-pasteable as-is:
+
+    export TURING_USER=spatadia                # <-- your WPI username
+    export TURING_HOST=turing.wpi.edu          # <-- confirm exact hostname
+    export TURING_DEST=/home/$TURING_USER/spgd-study
+
+================================================================================
+A) FIRST-TIME PUSH  (run once; ~few MB)
+================================================================================
+
+# 1. Create the project directory on Turing
+ssh ${TURING_USER}@${TURING_HOST} "mkdir -p ${TURING_DEST}/logs ${TURING_DEST}/results"
+
+# 2. Push source code, experiment scripts, configs, lock files, and Slurm script.
+#    -r recurses into directories.  We deliberately DO NOT push results/,
+#    figures/, .venv/, .cifar10_cache/, .openml_cache/, __pycache__/, or the
+#    spgd_paper/ PDF.
+scp -r src                     ${TURING_USER}@${TURING_HOST}:${TURING_DEST}/
+scp -r experiments             ${TURING_USER}@${TURING_HOST}:${TURING_DEST}/
+scp -r turing                  ${TURING_USER}@${TURING_HOST}:${TURING_DEST}/
+scp    pyproject.toml          ${TURING_USER}@${TURING_HOST}:${TURING_DEST}/
+scp    uv.lock                 ${TURING_USER}@${TURING_HOST}:${TURING_DEST}/
+scp    README.md               ${TURING_USER}@${TURING_HOST}:${TURING_DEST}/
+
+# 3. Bootstrap on the login node  (installs uv, syncs deps, prefetches CIFAR-10)
+ssh ${TURING_USER}@${TURING_HOST} "cd ${TURING_DEST} && bash turing/setup_turing.sh"
+
+================================================================================
+B) SUBMIT THE ARRAY JOB  (15 tasks: 5 optimizers x 3 seeds)
+================================================================================
+
+ssh ${TURING_USER}@${TURING_HOST} "cd ${TURING_DEST} && sbatch turing/slurm_exp4.sbatch"
+
+# Note the JOB_ID printed (e.g.  Submitted batch job 1234567).
+
+================================================================================
+C) MONITOR PROGRESS  (run any of these from local; each is a one-shot ssh)
+================================================================================
+
+# Queue status, just your jobs:
+ssh ${TURING_USER}@${TURING_HOST} "squeue -u ${TURING_USER}"
+
+# Per-task accounting once jobs start finishing:
+ssh ${TURING_USER}@${TURING_HOST} "sacct -X -j <JOB_ID> --format=JobID,State,Elapsed,MaxRSS,ExitCode"
+
+# Tail the live log of one array task (e.g. task 0):
+ssh ${TURING_USER}@${TURING_HOST} "tail -f ${TURING_DEST}/logs/exp4_<JOB_ID>_0.out"
+
+# Cancel everything (only if needed):
+# ssh ${TURING_USER}@${TURING_HOST} "scancel <JOB_ID>"
+
+================================================================================
+D) PULL RESULTS BACK  (once squeue is empty / all 15 tasks COMPLETED)
+================================================================================
+
+mkdir -p results logs
+
+# JSON metrics — one file per (opt, seed)
+scp "${TURING_USER}@${TURING_HOST}:${TURING_DEST}/results/exp4_*.json" results/
+
+# Slurm stdout/stderr (handy for the report appendix and for debugging)
+scp "${TURING_USER}@${TURING_HOST}:${TURING_DEST}/logs/exp4_*.out"  logs/
+scp "${TURING_USER}@${TURING_HOST}:${TURING_DEST}/logs/exp4_*.err"  logs/
+
+# Sanity check: should list 15 JSON files (e.g. exp4_sgd_s0_e50.json ...)
+ls results/exp4_*_e50.json | wc -l
+
+================================================================================
+E) UPDATING CODE MID-RUN  (e.g. fixed a bug, want to resubmit a few tasks)
+================================================================================
+
+# Push only the changed files; do NOT re-run setup_turing.sh:
+scp src/spgd_study/optimizers/spgd.py ${TURING_USER}@${TURING_HOST}:${TURING_DEST}/src/spgd_study/optimizers/
+scp experiments/exp4_cifar10.py        ${TURING_USER}@${TURING_HOST}:${TURING_DEST}/experiments/
+scp experiments/configs/exp4.yaml      ${TURING_USER}@${TURING_HOST}:${TURING_DEST}/experiments/configs/
+
+# Resubmit only the failed/changed tasks (e.g. SPGD seed 0 = array index 12):
+ssh ${TURING_USER}@${TURING_HOST} "cd ${TURING_DEST} && sbatch --array=12 turing/slurm_exp4.sbatch"
+
+================================================================================
+ARRAY INDEX -> (OPT, SEED) MAP  (for resubmission convenience)
+================================================================================
+    0  sgd  s0     5  adam s2    10  rpgd s1
+    1  sgd  s1     6  pgd  s0    11  rpgd s2
+    2  sgd  s2     7  pgd  s1    12  spgd s0
+    3  adam s0     8  pgd  s2    13  spgd s1
+    4  adam s1     9  rpgd s0    14  spgd s2
+================================================================================
