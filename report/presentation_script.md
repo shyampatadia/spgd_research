@@ -296,20 +296,34 @@ That control is the central methodological contribution of this work. I built it
 
 ## SLIDE 13 — Paired-seed protocol + saddle diagnostics
 
-**[~75s]**
+**[~90s]**
 
-"Two methodological details that matter a lot for clean results.
+"Two methodological details that show up in *every single experiment* in this talk.
 
-*(point left)* **Paired-seed protocol.** Random seeds matter a *huge* amount in deep learning — different initializations can give wildly different final accuracies. So the standard approach is: run each optimizer many times with different seeds and average. But then you're comparing averages across *different* seeds, and the seed noise can swamp the optimizer effect.
+### *(point left)* Paired-seed protocol — the cooking analogy.
 
-What I do instead: for each seed, fix the data split, fix the initialization — and *then* run all five optimizers from that *exact same starting point*. So at every seed I get five outcomes that share initialization. I can subtract them — that's a 'paired comparison.' It cancels out the seed noise. With small seed counts like 3 or 5, this is the difference between seeing a real effect and seeing nothing.
+Imagine you want to know whether recipe A is better than recipe B. You could cook A on Monday and B on Tuesday and compare — but Monday's tomatoes might be fresher, the oven temperature might drift, you might be in a different mood. Any difference between the two dishes is contaminated by all that *non-recipe* noise.
 
-*(point right)* **Direct saddle diagnostics.** I don't want to *infer* whether saddles matter — I want to *measure* it. So I track:
+The clean test is obvious: cook both with the **same tomatoes, same kitchen, same day,** and compare directly. The non-recipe variation cancels out, and what's left is the real recipe effect.
 
-- A **stagnation episode** — a stretch of consecutive steps where the gradient norm is below some tiny threshold $\varepsilon$. If you see lots of stagnation, saddles are biting.
-- **Escape time** — first step where the loss drops 5% below its starting value. This tells you how long you sat in the saddle plateau before getting out.
+That's exactly what I do with optimizers. For each seed, I **fix the data split and the initial weights first.** *Then* I run all five optimizers from that *identical* starting point. So at every seed, I get five outcomes that began the same way — and when I subtract optimizer A's result from optimizer B's, the initialization noise cancels.
 
-So instead of saying 'maybe saddles caused this,' I can say 'the gradient norm was below threshold for X steps.' Concrete. Measurable."
+### Where this protocol is used: **everywhere — every headline number in this talk is paired.**
+
+- **CIFAR-10's $+3.78$ percentage point SPGD-vs-RPGD gap** — that's a paired difference, computed seed-by-seed and then averaged.
+- **MovieLens' $-50$-step escape-time win** — also paired, on every seed.
+- **The Ackley $d{=}10$ paired loss gap of $-2.57$** — also paired.
+
+With only 3 seeds at the CIFAR-10 scale, an *un*paired comparison would have been completely drowned in initialization noise and we'd see nothing. **Pairing is what lets the signal through.**
+
+### *(point right)* Direct saddle diagnostics.
+
+I don't want to *infer* that saddles caused something — I want to *measure* it. Two diagnostics, both used in every experiment:
+
+- **Stagnation episode** — a stretch of consecutive steps where the gradient norm $\|\nabla f\|$ is below a tiny threshold $\varepsilon$. Lots of stagnation means saddles are biting.
+- **Escape time** — first step at which the loss drops 5% below its starting value. Tells you how long you sat in the saddle plateau before getting out.
+
+So instead of saying 'maybe saddles caused this,' I can say 'the gradient norm was below threshold for X consecutive steps.' Concrete, measurable, falsifiable. Not inferred from a loss curve."
 
 ---
 
@@ -426,29 +440,60 @@ This is the result. If you remember nothing else from this presentation, remembe
 
 ## SLIDE 18 — Experiment 6: MovieLens matrix completion
 
-**[~120s]**
+**[~3 min]**
 
-"Experiment 6 is where I directly stress-test the original paper's claim about neural-network training.
+"Okay, Experiment 6. This one needs more setup than the others, because the *task* itself is unfamiliar to most people. Let me actually walk through what we're doing before I get to results.
 
-*(point top left)* **Setup.** I take the MovieLens-100K rating matrix — users by movies, $943 \times 1682$, with most entries missing. I try to fill in the missing ratings via a low-rank factorization: $U V^\top$ where $U$ and $V$ are skinny matrices of rank 5. This is called Burer–Monteiro factorization.
+### The task — it's literally Netflix.
 
-Why this benchmark? Because the optimization theory community has *proven* that this problem has a saddle point near the origin. If you initialize $U$ and $V$ small, you start *inside* the saddle's region, and gradient descent escapes only slowly. This is exactly the geometry SPGD's selection rule is designed for. So if SPGD ever shines, it should shine here.
+Imagine you're Netflix. You have a giant table: **rows are users, columns are movies.** The cells contain ratings — 1 to 5 stars. **The catch is that most cells are empty.** Your average user has rated maybe a few hundred movies out of thousands; everyone else's ratings on those movies are missing. Your job — Netflix's actual job — is to **fill in those empty cells.** If you knew what every user *would* rate every movie they haven't seen, you'd know exactly which movies to recommend to each person.
 
-*(point right)* And it does — sort of. Look at the curves. The training loss on the left shows SPGD pulling ahead of SGD through the saddle plateau. SPGD escapes 50 steps earlier than SGD on every seed.
+So the entire recommender problem reduces to: **given a sparse matrix of known ratings, predict the missing ones.** That's called **matrix completion**, and it's the task in this experiment.
 
-*(point to the two key numbers)* **Two important numbers:**
+The dataset is **MovieLens-100K** — a public benchmark from the academic community. **943 users by 1,682 movies, with 100,000 known ratings.** Only about 6% of cells are filled. We hold out 20% of the known ratings as a test set, train on the other 80%, and measure how well we predict the held-out ratings.
 
-**1. Acceptance rate.** SPGD accepts a candidate on **30%** of perturbation phases. RPGD only accepts on **9%**. That threefold gap is *direct evidence* that the selection mechanism is firing as designed. It's not a silent algorithm. The selection rule is genuinely picking better candidates.
+### How matrix completion works.
 
-**2. Escape time.** SPGD escapes the saddle 50 steps before SGD, 40 steps before RPGD, on every seed.
+Here's the trick. We assume that ratings aren't random — there's a low-dimensional structure underneath. Specifically: each user has a small **taste vector** — say 5 numbers — capturing things like 'how much do they like action versus drama, indie versus blockbuster, slow versus fast pacing.' And each movie has a corresponding **feature vector** of 5 numbers — 'how action-y is this movie, how indie-y, how fast-paced.' And the predicted rating is just the **dot product** of those two vectors. A user who loves slow indie films will give a high rating to a movie that scores high on slow and indie.
 
-*(point to bottom block)* **But — and this is the honest part — the result is split.**
+So we factorize the user-movie matrix into two skinny matrices:
+- **U** is users by 5 — each row is one user's taste vector.
+- **V** is movies by 5 — each row is one movie's feature vector.
+- Our predicted rating matrix is U times V-transpose.
 
-The mechanism *transfers*. In a 13,000-parameter non-convex ML problem, SPGD's selection rule is empirically firing as the paper specifies. So the paper isn't wrong about the algorithm working in this regime.
+We don't *know* the taste and feature vectors in advance. We **learn** them by gradient descent: minimize the squared error between predicted ratings and the known ratings on the training set. Same machinery as the rest of the talk — minimize a loss, take gradient steps. The total parameter count is about 13,000 — small but genuinely non-convex.
 
-But the optimization head-start does *not* translate into a held-out generalization gain. Test RMSE is statistically tied with SGD. So 'SPGD makes you generalize better' — that part doesn't show up here.
+This setup has a name: **Burer-Monteiro factorization.** And it has one critical property that makes it the perfect benchmark for SPGD.
 
-I call this **mechanism-positive, generalization-neutral**. The selection rule does what the paper says, but the downstream benefit the paper hypothesizes — better test performance — doesn't materialize on this benchmark."
+### Why this benchmark — the saddle.
+
+The Burer-Monteiro loss has a **proven saddle point at the origin.** I'm not just hand-waving here — there are formal proofs from the optimization theory community. If you initialize U and V *near zero* — which we deliberately do, with initialization scale 0.01 — you start sitting *inside* that saddle's neighborhood. Gradient descent then has to slowly crawl its way out before training can really begin.
+
+**That's the geometry SPGD is designed to exploit.** Every other experiment in this talk had to *hope* there were saddles in the loss landscape. This benchmark *guarantees* one. So if SPGD's saddle-escape claim is ever going to shine, it should shine here.
+
+### Now the results.
+
+I run SGD, Adam, RPGD, and SPGD for 1,500 full-batch gradient steps, three seeds, paired protocol. Two numbers matter most.
+
+**Number one — acceptance rate.** *(point at top metric)* This is the most important diagnostic in the whole experiment, and it's the one I want you to remember. **SPGD accepts a candidate on 30 percent of its perturbation phases.** Meaning: 30% of the time, when SPGD samples 8 random candidate positions and ranks them, the best of those 8 actually beats the current iterate — so the algorithm commits the jump. The matched random control RPGD accepts on only **9 percent.** That **threefold gap** is **direct evidence that the selection mechanism is firing as designed.** SPGD is not silently behaving like SGD — its selection rule is genuinely picking better candidates than random chance would.
+
+This is important to me personally because going in, I was worried SPGD might be 'silent at scale' — that on a real ML problem the selection rule might rarely find an improving candidate, and the algorithm would degenerate into plain SGD. The 30% versus 9% gap shows that's not what's happening. It's alive.
+
+**Number two — escape time.** I define 'escape' as the first step at which the training loss drops 5% below its starting value. That's the moment we've left the saddle's neighborhood. **SPGD escapes 50 steps before SGD on every single seed; 40 steps before RPGD on every seed.** Three out of three. Consistent, paired, unambiguous.
+
+*(point at the curves on the right)* You can see this on the training-MSE panel — SPGD's curve dips below the others during the early steps and stays ahead through the middle of training, then everyone converges by the end.
+
+### But here's the honest part — the result is split.
+
+*(point at the bottom block)* I call this result **mechanism-positive, generalization-neutral**, and I want to explain both halves carefully.
+
+**Mechanism-positive:** SPGD really does what the paper says it does. The selection rule fires three times as often as random. The saddle escape happens fifty steps earlier on every seed. The algorithm is alive and working as designed in a real ML problem.
+
+**Generalization-neutral:** when I look at *test* RMSE — performance on the held-out 20% of ratings — **SPGD and SGD are statistically tied.** The paired delta is about $-0.002$, with the per-seed sign mixed. Some seeds favor SPGD, others favor SGD. So if the paper's stronger hypothesis is 'SPGD makes models generalize better,' that part doesn't materialize on this benchmark.
+
+The reason is simple: SPGD's optimization head-start gets *consumed* by the time training converges. Both methods reach essentially the same final solution; SPGD just got there faster. By the end, the test-set behavior is identical. So we have a real optimization advantage, but no downstream benefit when training runs to convergence.
+
+That's the cleanest test I could design of the original paper's neural-network claim, and the answer is split: the mechanism generalizes from 2-D test functions to a high-dimensional ML problem, but the 'significant enhancement' the paper hypothesizes does not."
 
 ---
 
