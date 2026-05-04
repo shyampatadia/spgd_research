@@ -391,7 +391,7 @@
   \vspace{0.7em}
   \begin{block}{What each contrast isolates}
     \begin{itemize}\setlength\itemsep{0.2em}
-      \item SPGD vs.\ \alert{RPGD}: \,is the \emph{selection rule} doing useful work? \;(novel)
+      \item SPGD vs.\ \alert{RPGD}: \,is the \emph{selection rule} doing useful work?
       \item SPGD vs.\ PGD: \,does multi-candidate perturbation help at all?
       \item SPGD vs.\ SGD: \,does perturbation+selection beat no perturbation?
     \end{itemize}
@@ -456,28 +456,68 @@
 
 \section{Experimental Findings}
 
-% --- EXP 1 ------------------------------------------------------------------
-\begin{frame}{Experiment 1 --- Synthetic benchmarks}
+% --- EXP 1a: setup + figure (with "why higher dims are empty" caveat) ------
+\begin{frame}{Experiment 1 --- Synthetic benchmarks (setup)}
   \begin{columns}[T,onlytextwidth]
-    \column{0.47\textwidth}
+    \column{0.40\textwidth}
       \footnotesize
-      \textbf{Setup.}
-      Rastrigin, Ackley, Rosenbrock; $d \in \{2,10,50\}$; 30 seeds per cell.
-      Convergence: $f(\theta) < 10^{-2}$.
-      \\[0.4em]
-      \textbf{Findings.}
-      \begin{itemize}\setlength\itemsep{0.15em}
-        \item Cleanest signal on \alert{Ackley $d{=}10$:} SPGD's mean
-              final loss is $-2.57$ below RPGD's (paired).
-        \item At $d{=}50$ a \emph{constant} amplitude becomes destructive
-              ($\sqrt{50/2}\!\approx\!5\times$ the displacement).
-        \item Per-parameter scaling of \amp{} fixes this in subsequent experiments.
+      \textbf{Three benchmark functions.}
+      \begin{itemize}\setlength\itemsep{0.2em}
+        \item \textbf{Rastrigin:} egg-carton --- hundreds of local
+              minima around one global. Pure \emph{escape} problem.
+        \item \textbf{Ackley:} funnel-shaped global basin + many shallow
+              pits. Mixed escape/speed.
+        \item \textbf{Rosenbrock:} curved banana valley, \emph{no} local
+              minima. Pure \emph{speed} test.
       \end{itemize}
-    \column{0.5\textwidth}
+      \vspace{0.4em}
+      \textbf{Protocol.} $d \in \{2,10,50\}$; 30 seeds per cell;
+      success $\equiv f(\theta) < 10^{-2}$ from global optimum.
+      \vspace{0.4em}
+
+      \alert{Why $d{=}10$ and $d{=}50$ bars are empty:} the
+      $10^{-2}$-tight target ball is simply unreachable in budget --- not
+      failure, just a binary metric saturating. \emph{Loss-value}
+      differences at higher $d$ \emph{do} discriminate (next slide).
+    \column{0.57\textwidth}
       \centering
-      \includegraphics[width=\linewidth]{figures/exp1_success_rate.png}\\[0.2em]
-      \scriptsize{Success rate per (function, dimension, optimiser).}
+      \includegraphics[width=\linewidth]{figures/exp1_success_rate.png}\\[0.3em]
+      \scriptsize{Success rate per (function, dimension, optimiser).
+                  $d{=}10$ and $d{=}50$ are zero across the board ---
+                  see caption-text on left.}
   \end{columns}
+\end{frame}
+
+% --- EXP 1b: per-benchmark interpretation ----------------------------------
+\begin{frame}{Experiment 1 --- Per-benchmark interpretation}
+  \footnotesize
+  \begin{itemize}\setlength\itemsep{0.4em}
+    \item \alert{Rastrigin ($d{=}2$, escape problem):}
+          SPGD \textbf{63\%} vs RPGD \textbf{20\%} --- same compute, same
+          mechanism, only the selection rule differs. \alert{Cleanest
+          evidence in this experiment that the steepest-selection rule
+          does real work.} SGD/Adam stuck at 7\%; PGD at 0\% (single
+          Gaussian sample isn't enough to find an escape direction).
+    \item \alert{Ackley ($d{=}10$, mixed):} success rate is uninformative
+          at $d{=}2$ (everyone $\sim$17\%). At $d{=}10$, \textbf{SPGD's
+          mean final loss is $-2.57$ below RPGD's} on a paired comparison
+          --- the binary success criterion doesn't fire here, but the
+          loss-value gap is the headline number from this experiment.
+    \item \alert{Rosenbrock ($d{=}2$, pure speed):} no local minima --- so
+          this is purely a question of who descends a curved valley
+          faster. PGD \textbf{93\%} and SPGD \textbf{90\%} both dominate;
+          RPGD partial at 57\%; Adam 20\%; SGD 3\% (gradient
+          poorly aligned with the curved valley axis).
+  \end{itemize}
+  \vspace{0.5em}
+  \begin{block}{Caveat carried into all later experiments}
+    Constant per-coordinate \amp{} becomes destructive at $d{=}50$:
+    total displacement scales as $\sqrt{d}$, so an amplitude tuned at
+    $d{=}2$ is $\sqrt{50/2}\!\approx\!5\times$ too large at $d{=}50$.
+    \alert{Per-parameter amplitude scaling}
+    ($\amp_p \propto \mathrm{std}(\theta_p^{(0)})$) is used in all
+    subsequent experiments.
+  \end{block}
 \end{frame}
 
 % --- EXP 3 ------------------------------------------------------------------

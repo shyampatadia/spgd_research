@@ -288,7 +288,7 @@ That control is the central methodological contribution of this work. I built it
 
 *(point to the contrasts block)* And here's why each pairwise comparison matters:
 
-- **SPGD vs. RPGD** — same compute, same mechanism, only the selection differs. So if SPGD wins, it's the *selection rule* doing the work. This is the novel comparison.
+- **SPGD vs. RPGD** — same compute, same mechanism, only the selection differs. So if SPGD wins, it's the *selection rule* doing the work. This is the comparison this study introduces, and it's the cleanest test of the central claim.
 - **SPGD vs. PGD** — does multi-candidate perturbation help at all over a single perturbation?
 - **SPGD vs. SGD** — does perturbation+selection beat doing nothing fancy at all?"
 
@@ -330,23 +330,51 @@ The scale is increasing dramatically — from 2-dimensional toy problems up to 1
 
 ---
 
-## SLIDE 15 — Experiment 1: Synthetic benchmarks
+## SLIDE 15a — Experiment 1: Synthetic benchmarks (setup)
 
 **[~75s]**
 
 "Experiment 1. The classics.
 
-*(point left)* I ran all five optimizers on three benchmark functions — Rastrigin, Ackley, Rosenbrock — at three dimensions: 2, 10, and 50. Thirty random initializations per cell. Convergence is declared when the loss drops below $10^{-2}$.
+I ran all five optimizers on three benchmark functions, at three dimensions — 2, 10, and 50 — with 30 random initializations per cell. Let me describe the three functions, because each one tests something different.
 
-These functions are evil on purpose. Rastrigin and Ackley both have *tons* of local minima — like an egg carton. Vanilla gradient descent gets trapped immediately. Rosenbrock is a long curved valley.
+*(point at the three bullets)*
 
-**Findings:**
+**Rastrigin** is an egg-carton. Hundreds of evenly-spaced local minima around one global. This is a **pure escape problem** — can your optimizer get out of a local pit?
 
-- The cleanest result is on Ackley at $d=10$. SPGD's mean final loss is $-2.57$ below RPGD's, on a paired comparison. That's a real signal — same starting points, same compute, just the selection rule differing, and SPGD wins.
-- At $d=50$ the perturbation methods start *failing*. Why? The amplitude $\textit{Amp}$ was constant — but in higher dimensions, a uniform perturbation of fixed amplitude per coordinate produces a much bigger total displacement (it scales like $\sqrt{d}$). So a perturbation that was helpful at $d=2$ becomes destructively large at $d=50$.
-- The fix is per-parameter scaling of the amplitude — using each parameter's standard deviation. I applied that in all later experiments.
+**Ackley** is a funnel-shaped global basin surrounded by many shallow pits. So it's *mixed* — escape early on, then speed once you've found the funnel.
 
-*(point right)* The success-rate plot on the right shows: SPGD matches or exceeds RPGD on every Rastrigin and Ackley cell."
+**Rosenbrock** is the geometrically easy one — *no local minima at all,* just one long curved banana-shaped valley. This is a **pure speed test**: who can crawl down a curved gradient fastest?
+
+The success criterion is brutal: a run only counts as successful if it lands within $10^{-2}$ of the true global minimum. *Very* tight ball.
+
+*(point at the figure)* Now you'll notice something immediately: **only the $d=2$ column has any bars**. The $d=10$ and $d=50$ columns are empty across the board, for *every* optimizer. That's not a bug, and nobody actually 'failed' there. The success criterion is just too tight — that $10^{-2}$ ball is unreachable in our time budget at higher dimensions. The optimizers *are* making meaningful progress at $d=10$ and $d=50$ — that progress just shows up in the *loss-value* plots, not in this binary success-or-not metric.
+
+In particular, the headline number from this experiment comes from $d=10$ Ackley loss values, not from this success-rate plot. I'll show that on the next slide."
+
+---
+
+## SLIDE 15b — Experiment 1: Per-benchmark interpretation
+
+**[~2 min]**
+
+"Now let me actually read this figure benchmark-by-benchmark.
+
+**Rastrigin** — the escape problem. *(point at left panel of figure)* **SPGD wins at 63 percent.** RPGD trails at 20 percent. SGD and Adam are stuck around 7 percent — they fall into the first local pit and never escape. PGD is at zero — its single Gaussian sample per phase isn't enough to find an escape direction in this geometry.
+
+The number to focus on is the **SPGD-vs-RPGD gap: 63 percent versus 20 percent.** Both algorithms perturb the same way, draw the same number of candidates, and pay the same compute cost. The only thing that differs is the selection rule — SPGD picks the steepest, RPGD picks one at random. **That gap is the cleanest piece of evidence in this experiment that the steepest-selection rule is doing real work**, not just the perturbation alone.
+
+**Ackley** — the mixed problem. At $d=2$, the success-rate metric isn't very informative — all four perturbation and adaptive methods cluster around 16–17 percent. Only SGD never escapes. So you can't separate SPGD from RPGD on success here.
+
+**But** — when you measure *loss values* at $d=10$ instead of binary success, the picture sharpens. **SPGD's mean final loss is $-2.57$ below RPGD's on a paired comparison.** Same seeds, same starting points, same compute — and SPGD's loss is consistently lower. That paired delta is the actual headline number from this experiment; the success-rate metric just doesn't fire here because nobody hits the $10^{-2}$ ball.
+
+**Rosenbrock** — pure speed. This benchmark has no local minima at all, so escape is irrelevant. It's a pure question of who descends a curved valley fastest. *(point at right panel)* **PGD wins at 93 percent, SPGD ties at 90 percent.** RPGD partial at 57. Adam at 20. SGD at 3. SGD struggles because the gradient is poorly aligned with the curved valley axis — you have to move along an arc, but each gradient step points across the arc.
+
+The takeaway from Rosenbrock: SPGD doesn't *beat* simpler perturbation here because there's no escape problem to leverage. Where the geometry doesn't have local minima, the selection rule has nothing distinctive to do.
+
+**One important caveat from this experiment** *(point at the bottom block)* — and this affected my design of every later experiment. At $d=50$, even the success rate at $d=10$ collapses, but the deeper reason is geometric. I held the amplitude constant per-coordinate, but in $d$ dimensions, the total displacement of a uniform perturbation scales like $\sqrt{d}$ — so an amplitude tuned for $d=2$ is about $\sqrt{50/2} \approx 5$ times too large at $d=50$. At that scale the perturbations stop being helpful exploration and start *destroying* useful gradient information.
+
+The fix — which I used in every subsequent experiment — is per-parameter amplitude scaling: each weight's perturbation is proportional to that weight's typical scale, not a global constant."
 
 ---
 
