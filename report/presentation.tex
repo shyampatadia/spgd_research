@@ -112,61 +112,67 @@
 % ----- INTUITION 1: what does "stuck at a saddle" look like ---------------
 \begin{frame}{What does ``stuck at a saddle'' actually look like?}
   \begin{columns}[T,onlytextwidth]
-    \column{0.42\textwidth}
+    \column{0.50\textwidth}
       \footnotesize
-      Picture a 1-D loss with a flat plateau between two slopes.\\[0.5em]
-      On the plateau the gradient is essentially zero, so a gradient
-      method takes \alert{tiny steps that look like no progress}
-      (bottom panel: $\|\nabla f\|$ falls below the stagnation
-      threshold $\varepsilon$).\\[0.5em]
-      But the iterate is \emph{not} at the minimum --- there is a
-      genuine descent direction past the plateau. The optimiser is
-      blind to it because $\nabla f$ alone cannot see past
-      what's directly under its feet.\\[0.5em]
-      In high dimensions the same picture multiplies: every saddle is
-      a plateau in some directions and a descent in others, and the
-      geometry hides the descent direction from first-order tools.
-    \column{0.55\textwidth}
+      \textbf{Picture a literal horse's saddle} with a ball placed on
+      it.\\[0.4em]
+      Roll the ball \emph{front-to-back} --- along the dip where the
+      rider would sit --- and it swings back and forth, eventually
+      \alert{settling in the middle}. That middle point is the
+      \alert{saddle point}: the loss looks minimised in this
+      direction.\\[0.4em]
+      But the ball is in \emph{unstable equilibrium.} Nudge it
+      \emph{perpendicular} to that dip --- toward either flank of the
+      saddle --- and it \alert{falls off drastically.} The surface
+      curves sharply \emph{down} in that direction.\\[0.4em]
+      So at a saddle point: gradient is zero (looks like ``done''),
+      but a real descent direction exists --- and a first-order method
+      can't see it. The bottom panel below shows the consequence in
+      time: $\|\nabla f\|$ drops below the stagnation threshold
+      $\varepsilon$ and stays there.
+    \column{0.47\textwidth}
       \centering
-      \includegraphics[width=\linewidth]{../figures/intuition_saddle_plateau.png}
+      \includegraphics[width=\linewidth]{figures/intuition_saddle_plateau.png}\\[0.2em]
+      \scriptsize{1-D cross-section through the saddle's stable
+                  direction (top); resulting gradient-norm trace (bottom).}
   \end{columns}
 \end{frame}
 
 % ----- INTUITION 2: adaptive vs perturbation --- the core idea ------------
 \begin{frame}{Two ways to get unstuck --- intuitively}
-  \begin{block}{The hiking analogy}
-    You're hiking down a foggy mountain to find the lowest valley.
-    Sometimes the ground flattens out --- you're \emph{somewhere}, not
-    at the bottom, and your sense of slope says ``stop.''
-    Two strategies:
+  \begin{block}{Imagine a recommender system that's stuck}
+    Spotify keeps suggesting the same kind of song to a user who keeps
+    skipping. The system's best guess is no longer improving --- it's
+    \emph{stuck}. Two strategies to break out:
   \end{block}
   \vspace{0.3em}
   \begin{columns}[T,onlytextwidth]
     \column{0.48\textwidth}
-      \begin{block}{Adaptive: \emph{walk smarter}}
+      \begin{block}{Adaptive: \emph{tune what you already know}}
         \footnotesize
-        Don't just step in the gradient direction --- learn that some
-        compass directions have always been flat (need bigger strides),
-        and some have been steep (need smaller, careful steps).
+        Look at history feature-by-feature: the user always finishes
+        acoustic songs (small, careful steps in that direction), always
+        skips electronic ones (big steps to avoid that region). Scale
+        each direction by how confident you are.
         \\[0.4em]
-        \alert{Adam, RMSProp, AdaGrad} do exactly this:
-        rescale $\nabla f$ per-coordinate by past gradient
+        \alert{Adam, RMSProp, AdaGrad} do exactly this for gradient
+        descent: rescale $\nabla f$ per-coordinate by past gradient
         magnitudes.\\[0.3em]
-        \warn{Still only uses the loss at where you are right now.}
+        \warn{Still only uses information you've already collected.}
       \end{block}
     \column{0.48\textwidth}
-      \begin{block}{Perturbation: \emph{take a leap}}
+      \begin{block}{Perturbation: \emph{play a wildcard}}
         \footnotesize
-        When the slope tells you ``no progress,'' \emph{jump} a few
-        feet in a random direction and check if you've fallen.
-        Most jumps land you back on flat ground; some land you on
-        a downhill slope.
+        Just \emph{recommend a random song} from the whole catalogue ---
+        even one that doesn't fit the user's pattern. Most get skipped.
+        But occasionally, by accident, one is a banger they never would
+        have found from their history alone.
         \\[0.4em]
         \alert{PGD} \scriptsize{\citep{jin2017escape}} \footnotesize injects
         Gaussian noise when the gradient gets small, then continues
         with gradient descent.
         \\[0.3em]
-        \warn{Commits to the first jump regardless of where it lands.}
+        \warn{Commits to the random pick regardless of where it lands.}
       \end{block}
   \end{columns}
 \end{frame}

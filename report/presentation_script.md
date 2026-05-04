@@ -62,41 +62,43 @@ So the next slide explains what 'stuck at a saddle' actually means, because that
 
 ## SLIDE 4 — What does "stuck at a saddle" actually look like?
 
-**[~75s]**
+**[~90s]**
 
-"Let me show you what a saddle point feels like *intuitively*, because the math word 'saddle' doesn't help most people.
+"Let me show you what a saddle point actually *is*, because the math word 'saddle' is more literal than people realise — it really does come from a horse's saddle.
 
-Picture the loss as a landscape. You're a hiker, and you want to walk downhill to the lowest point. Now imagine you walk into a long flat plateau. The ground around you is *almost* perfectly flat — your sense of slope says, 'we're done, no direction goes down.'
+So picture an actual horse's saddle. Take a ball and place it somewhere on it.
 
-But you're *not* at the bottom. If you walked far enough across the plateau, the ground would eventually start going down again. You just can't tell that from where you're standing, because the gradient — your local sense of slope — is essentially zero.
+Now roll the ball *front-to-back* — along the dip where the rider would sit. It swings back and forth, oscillates, and eventually it settles right in the middle of the dip. From this direction, that middle point looks like a *minimum*. The ball is at rest. The 'gradient' — the slope of the surface in this direction — is zero. Everything tells you 'we're done.'
 
-That's a saddle point. *(point to the figure on the right)* You can see it on the right: the top panel shows a 1-D loss with a flat region, and the bottom panel shows the gradient norm dropping below this red threshold $\varepsilon$ — that's our 'we're stuck' detector.
+But here's the trick. The ball is in *unstable equilibrium*. If you give it the slightest nudge in the *perpendicular* direction — toward either side of the saddle, where the rider's legs would dangle — the surface curves *sharply down*, and the ball **falls off the saddle drastically**.
 
-A gradient method is *blind* in this region. It only knows 'how steep is it right under my feet?', and the answer is 'not steep at all,' so it takes microscopic steps and basically stops making progress.
+That middle point is the **saddle point**. It's a minimum in one direction and a maximum in the perpendicular direction. The gradient is zero, so a first-order method like SGD looks at it and thinks, 'I'm at a minimum, I'm done.' But there's a real descent direction available — the optimiser just can't see it because the gradient at the saddle is exactly zero in every direction.
 
-Now in *high* dimensions — millions of parameters — this gets worse, because every saddle is flat in *some* directions and downhill in *others*. The downhill directions exist, but the gradient can't see them. That's why saddles dominate the landscape and that's why they trap us."
+*(point to the figure on the right)* The figure on the right shows this in 1-D: the top panel is a cross-section through the saddle's stable direction — looks flat near the middle. The bottom panel shows the consequence: the gradient norm drops below this threshold $\varepsilon$ and stays there. That's our 'we're stuck' detector — a stagnation episode.
+
+In high dimensions — millions of parameters — this gets way worse. Every saddle has *some* directions where it looks like a minimum and *some* where it's actually a maximum. There are exponentially more saddles than true minima. That's why saddles dominate the landscape and that's why they trap us."
 
 ---
 
 ## SLIDE 5 — Two ways to get unstuck
 
-**[~90s]**
+**[~100s]**
 
-"So if gradient methods get stuck at saddles, how do we get unstuck? There are basically two families of answers.
+"So if gradient methods get stuck at saddles, how do we get unstuck? There are basically two families of answers — and let me explain them with something everyone in this room uses every day: a recommendation system.
 
-*(point to the hiking analogy block)* Stay with the hiking picture. You're on a foggy mountain. You hit a flat patch. Two strategies:
+*(point to the recommender block)* Imagine you're Spotify. A user is listening, and you've been recommending songs you think they'll like. But they just keep hitting skip. Your model is *stuck* — its best guess is no longer making them happy, and the obvious next-best song is too similar to the one they just skipped. What do you do? There are two strategies.
 
-**Strategy 1: Walk smarter.** This is the **adaptive** family — Adam, RMSProp, AdaGrad. The idea is: don't just step in the gradient direction. Learn from history. If a particular direction has *always* been flat, take *bigger* strides in that direction. If a particular direction has been steep and bouncy, take smaller, more careful steps. Adam is doing this for every single parameter individually — that's what 'adaptive per-coordinate scaling' means.
+**Strategy 1: Tune what you already know.** This is the **adaptive** family — Adam, RMSProp, AdaGrad. The idea is: look at the user's history *per feature*. Maybe they always finish acoustic songs — so be careful and take small, fine-grained steps in that direction. Maybe they always skip electronic songs — so take *big* steps to move away from that region quickly. Each feature gets its own scaling, based on how confident you are.
 
-This is why Adam is so popular and why it usually wins on benchmarks. It's much smarter about *how* to step.
+That's literally what Adam does for gradient descent. It rescales the gradient per parameter, individually, based on the history of past gradients. Steep directions get smaller steps; flat directions get bigger steps. That's why Adam usually wins on benchmarks — it's just *smarter* about how to step.
 
-But — here's the catch — Adam still only looks at the loss *where it currently stands*. It never says, 'let me check what the loss looks like a few steps to my left.'
+But — here's the catch. Adam still only uses information it has already collected from the user. It never says, 'let me try something completely different and see what happens.'
 
-**Strategy 2: Take a leap.** This is the **perturbation** family. When the slope tells you 'no progress, you're stuck,' the strategy is: don't trust it. Just *jump* in a random direction and check — did I land somewhere lower?
+**Strategy 2: Play a wildcard.** This is the **perturbation** family. When the model is stuck, the strategy is: don't trust the history. Just *recommend a totally random song* from the catalogue — even one that doesn't fit the user's pattern at all.
 
-Most jumps will land you back on flat ground. But some jumps will accidentally land you on a downhill slope, and then gradient descent can take over again and slide you down.
+Most random recommendations will be skipped. The user has never liked this stuff before, why would they now? But occasionally — by accident — that random song will be a banger they never would have discovered from their existing taste. And then suddenly your model has a whole new region of preferences to learn from.
 
-PGD — Perturbed Gradient Descent — is the simplest version. When the gradient gets small, throw in some Gaussian noise, then keep going. The catch with PGD is: it commits to *one* random jump. Whatever that jump landed on, you live with."
+PGD — Perturbed Gradient Descent — does exactly this for optimisation. When the gradient gets small and you suspect you're stuck, throw in some Gaussian noise. Most of the noise lands you nowhere useful. But occasionally it lands you somewhere with a meaningful gradient again, and you can keep descending. The catch with PGD is: it commits to *one* random pick. Whatever that one pick was, you live with."
 
 ---
 
