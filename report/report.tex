@@ -50,15 +50,19 @@
 \setcounter{bottomnumber}{3}
 \setcounter{totalnumber}{6}
 
-% Allow pages to end short instead of being vertically justified -- this
-% is the main fix for "huge gap before a figure that didn't fit".
-\raggedbottom
+% Vertically justify pages: any slack is absorbed into the existing
+% rubber spacing around floats / paragraphs (\textfloatsep, \intextsep,
+% \parskip), which spreads gaps invisibly instead of letting a single
+% deferred float leave a large block of trailing whitespace.
+\flushbottom
 
-% Tighten the white space around floats (default \article spacing is
-% generous and causes visible gaps especially for [H] figures).
-\setlength{\textfloatsep}{8pt plus 2pt minus 2pt}
-\setlength{\intextsep}{8pt plus 2pt minus 2pt}
-\setlength{\floatsep}{8pt plus 2pt minus 2pt}
+% Tight nominal spacing around floats (default \article spacing is
+% generous), with enough rubber stretch (plus...) that \flushbottom can
+% absorb page slack across multiple gaps instead of dumping it at the
+% bottom of the page.
+\setlength{\textfloatsep}{8pt plus 6pt minus 2pt}
+\setlength{\intextsep}{8pt plus 6pt minus 2pt}
+\setlength{\floatsep}{8pt plus 6pt minus 2pt}
 \setlength{\abovecaptionskip}{4pt}
 \setlength{\belowcaptionskip}{2pt}
 
